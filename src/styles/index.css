@@ -1,13 +1,30 @@
 /* Global stylesheet — imports tokens, applies body styling, defines .glass-card utility. */
 /* Verbatim sourcing from HANDOFF.md §4 for body + .glass-card. */
 
-@import './tokens.css';
+@import "./tokens.css";
 
 /* Minimal reset — sufficient for Phase 0; expand if/when a real clash appears. */
-*, *::before, *::after { box-sizing: border-box; }
-html, body, #root { margin: 0; padding: 0; min-height: 100vh; }
-button { font-family: inherit; cursor: pointer; }
-img, svg { display: block; max-width: 100%; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
 
 /* Body — verbatim from HANDOFF §4. */
 body {

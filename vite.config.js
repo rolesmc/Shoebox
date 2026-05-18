@@ -123,4 +123,12 @@ export default defineConfig({
     port: 5188,
     strictPort: false,
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        dbtest: "db-test.html",
+      },
+    },
+  },
 });
