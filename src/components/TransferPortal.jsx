@@ -201,8 +201,9 @@ export default function TransferPortal({
                 cursor: "pointer",
                 transition: "all 0.2s",
               }}
+              title="Clears the transfer queue but preserves the destination folder mapping for resume. Sign out to start a fully fresh migration."
             >
-              Reset
+              Clear queue
             </button>
           </>
         )}
