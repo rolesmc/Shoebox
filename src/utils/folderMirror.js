@@ -63,25 +63,31 @@ export function collectAncestorFolderIds(selectedIds, filesById) {
 /**
  * Phase-local retry wrapper. Phase 7 will own the generic fetchWithBackoff (A1);
  * mirroring this minimal shape avoids cross-phase coupling.
- * - 401 / authError → never retry; call onAuthError; rethrow
+ * - 401 / authError → never retry; rethrow (caller's outer catch owns auth-error UX)
  * - 429 / 5xx / rateLimitExceeded → ±50% jittered exponential backoff, cap 32s, 5 attempts
  * - storageQuotaExceeded / 4xx → fatal, rethrow (NO "skip" — would orphan descendants)
+ *
+ * WR-01: onAuthError is intentionally NOT invoked here. The outer catch in
+ * BentoDashboard's mirror effect funnels 401/authError into handleApiError once.
+ * Invoking it here too caused double-invocation; handleApiError is idempotent
+ * but the double-call pattern was fragile.
+ * WR-06: explicit throw after the loop guarantees we never silently return undefined.
  */
 async function createFolderWithRetry({
   createFolder,
   name,
   parents,
   token,
-  onAuthError,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 }) {
+  let lastErr;
   for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
     try {
       return await createFolder({ name, parents, token });
     } catch (err) {
+      lastErr = err;
       if (err?.status === 401 || err?.reason === "authError") {
-        await onAuthError?.(err);
-        throw err;
+        throw err; // caller's outer catch owns onAuthError invocation (WR-01)
       }
       const retryable =
         (typeof err?.status === "number" && err.status >= 500) ||
@@ -100,6 +106,11 @@ async function createFolderWithRetry({
       throw err;
     }
   }
+  // WR-06: defensive — if the loop ever exits without returning or throwing
+  // (e.g. a future refactor turns the inner `throw` into `break`), surface a
+  // clear error instead of returning undefined and causing a confusing
+  // "TypeError: Cannot read properties of undefined (reading 'id')" at the call site.
+  throw lastErr || new Error("[FolderMirror] createFolderWithRetry exhausted without resolution");
 }
 
 /**
@@ -112,7 +123,6 @@ async function ensureRoot({
   createFolder,
   folderMapStore,
   now,
-  onAuthError,
 }) {
   const existing = await folderMapStore.getFolderMapping(ROOT_SENTINEL);
   if (existing) return existing.destFolderId;
@@ -123,7 +133,6 @@ async function ensureRoot({
     name,
     parents: ["root"],
     token: destToken,
-    onAuthError,
   });
   await folderMapStore.putFolderMapping(ROOT_SENTINEL, res.id, name);
   return res.id;
@@ -154,7 +163,6 @@ async function ensureDestFolder(srcId, ctx) {
     name,
     parents: [destParentId],
     token: ctx.destToken,
-    onAuthError: ctx.onAuthError,
   });
 
   // 4. Persist BEFORE onProgress / return (MIRROR-03 — PERS-03 invariant)
@@ -178,7 +186,10 @@ export async function mirrorFolders({
   filesById,
   destToken,
   onProgress,
-  onAuthError,
+  // WR-01: onAuthError parameter is accepted for backward compatibility with
+  // callers but no longer invoked here — the caller's outer catch is the
+  // single funnel for 401/authError handling. See createFolderWithRetry header.
+  onAuthError, // eslint-disable-line no-unused-vars
   createFolder = realCreateFolder,
   folderMapStore = FolderMapStore,
   now = () => new Date(),
@@ -191,7 +202,6 @@ export async function mirrorFolders({
     createFolder,
     folderMapStore,
     now,
-    onAuthError,
   });
 
   const ancestorIds = collectAncestorFolderIds(ids, filesById);
@@ -202,7 +212,6 @@ export async function mirrorFolders({
     destToken,
     createFolder,
     folderMapStore,
-    onAuthError,
     onProgress,
     totalCount: ancestorIds.size + 1,
     createdCount: 1, // root counts as already created/reused
