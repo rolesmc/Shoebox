@@ -1,8 +1,7 @@
 // src/mocks/failureInjection.js
 // DEV-ONLY: runtime-toggleable failure injector. Plan 04's DevPanel binds setFailureMode.
-if (!import.meta.env.DEV) {
-  throw new Error('failureInjection.js loaded outside DEV — this module is dev-only.');
-}
+// DEV-only by convention — enforced by callers using DEV-gated dynamic imports.
+// Module is inert if loaded in prod (no top-level side effects beyond Object.freeze).
 
 export const FAILURE_MODES = Object.freeze([
   'none',
