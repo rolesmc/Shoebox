@@ -58,7 +58,10 @@ export default function BentoDashboard() {
   const [queueState, setQueueState] = useState("idle");
   // Phase 6 mirror state (MIRROR-01..04)
   const [mirrorProgress, setMirrorProgress] = useState({ created: 0, total: 0, name: "" });
-  const [rootDestId, setRootDestId] = useState(null);  // consumed by Phase 7 copy queue
+  // WR-03: rootDestId removed from component state. Phase 7's copy queue should
+  // read the destination root from IndexedDB via
+  // FolderMapStore.getFolderMapping(ROOT_SENTINEL).destFolderId — it survives
+  // reloads/resume and is the authoritative source of truth.
   const [mirrorError, setMirrorError] = useState(null);
   const [gaugeState, setGaugeState] = useState("partial");
   const [resumeState, setResumeState] = useState("no-cursor");
@@ -345,7 +348,10 @@ export default function BentoDashboard() {
         });
 
         if (!active) return;
-        setRootDestId(result.rootDestId);
+        // WR-03: result.rootDestId is now read from FolderMapStore by Phase 7.
+        // We deliberately do NOT mirror it into component state — IDB is the
+        // source of truth and survives reload.
+        void result;
         setQueueState("copying");
       } catch (err) {
         if (!active) return;
