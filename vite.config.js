@@ -19,8 +19,9 @@ function viteCspPlugin() {
     transformIndexHtml(html) {
       const devCsp = [
         "default-src 'none'",
-        "script-src 'self' 'unsafe-eval' https://accounts.google.com/gsi/client",
-        "style-src 'self' 'unsafe-inline'",
+        "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://accounts.google.com/gsi/client",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
         "connect-src 'self' ws://localhost:* wss://localhost:* https://www.googleapis.com/ https://accounts.google.com/gsi/",
         "img-src 'self' data: https://lh3.googleusercontent.com/",
         "frame-src https://accounts.google.com/",
@@ -31,7 +32,8 @@ function viteCspPlugin() {
       const prodCsp = [
         "default-src 'none'",
         "script-src 'self' https://accounts.google.com/gsi/client",
-        "style-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
         "connect-src 'self' https://www.googleapis.com/ https://accounts.google.com/gsi/",
         "img-src 'self' data: https://lh3.googleusercontent.com/",
         "frame-src https://accounts.google.com/",

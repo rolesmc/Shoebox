@@ -20,7 +20,8 @@ import DevPanel from "./DevPanel.jsx";
 import { GoogleAuth } from "../services/googleAuth.js";
 import { TokenStorage } from "../services/storage.js";
 import MockLoginModal from "./MockLoginModal.jsx";
-import { clearAllData, FileStore } from "../services/db.js";
+import { clearAllData, FileStore, SelectionStore, QueueStore } from "../services/db.js";
+import { applyFilters } from "../services/filters.js";
 
 // Neutral STATE_OPTIONS module
 import { STATE_OPTIONS } from "./stateOptions.js";
@@ -301,30 +302,144 @@ export default function BentoDashboard() {
   }, [scanState, sourceToken]);
 
   // ----------------------------------------------------
-  // Simulated Copy Queue Progression & Interruption (Task 4)
+  // Dynamic Background Transfer Loop (GAUGE-02, FILES-04)
   // ----------------------------------------------------
   useEffect(() => {
     if (queueState !== "mirroring" && queueState !== "copying") return;
 
-    let timerId = setTimeout(async () => {
-      try {
-        if (import.meta.env.DEV) {
-          const { throwIfArmed } = await import("../mocks/failureInjection.js");
-          throwIfArmed();
-        }
+    let active = true;
 
-        if (queueState === "mirroring") {
-          setQueueState("copying");
-        } else if (queueState === "copying") {
-          setQueueState("done");
-        }
-      } catch (err) {
-        await handleApiError(err);
+    const runQueue = async () => {
+      if (queueState === "mirroring") {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (!active) return;
+        setQueueState("copying");
+        return;
       }
-    }, 2000);
 
-    return () => clearTimeout(timerId);
-  }, [queueState]);
+      // queueState is "copying"
+      const selectedArr = Array.from(selectedIds);
+      if (selectedArr.length === 0) {
+        setQueueState("done");
+        return;
+      }
+
+      // 1. Initialize or load tasks in QueueStore
+      const existingTasks = await QueueStore.getTasks();
+      const taskMap = new Map(existingTasks.map((t) => [t.id, t]));
+
+      for (const fileId of selectedArr) {
+        if (!taskMap.has(fileId)) {
+          await QueueStore.updateTask(fileId, { status: "pending", bytesCopied: 0 });
+        }
+      }
+
+      let currentTasks = await QueueStore.getTasks();
+      let activeRun = true;
+
+      while (active && activeRun && queueState === "copying") {
+        const pendingOrFailed = currentTasks.filter(
+          (t) => selectedIds.has(t.id) && t.status !== "completed",
+        );
+
+        if (pendingOrFailed.length === 0) {
+          setQueueState("done");
+          activeRun = false;
+          break;
+        }
+
+        // Process up to 3 files concurrently
+        const batch = pendingOrFailed.slice(0, 3);
+        const promises = batch.map(async (task) => {
+          let injectedFailure = "none";
+          try {
+            if (import.meta.env.DEV) {
+              const { getFailureMode } = await import("../mocks/failureInjection.js");
+              injectedFailure = getFailureMode();
+            }
+          } catch (e) {
+            console.warn("Dev failure modes could not be queried:", e);
+          }
+
+          if (injectedFailure !== "none") {
+            let errorMsg = "Google API Error: Daily quota limit exceeded.";
+            let nextStatus = "failed";
+
+            if (injectedFailure === "401") {
+              await handleApiError({ status: 401, errors: [{ reason: "authError" }] });
+              return;
+            } else if (injectedFailure === "429-userRateLimit") {
+              errorMsg = "Error 429: userRateLimitExceeded. Retrying with exponential backoff...";
+              nextStatus = "failed";
+            } else if (injectedFailure === "403-dailyLimit") {
+              errorMsg = "Error 403: dailyLimitExceeded. Daily copy quota of 750 GB reached.";
+              nextStatus = "failed";
+              await QueueStore.updateTask(task.id, { status: nextStatus, errorMsg });
+              setQueueState("failed-with-retries");
+              activeRun = false;
+              return;
+            } else if (injectedFailure === "404") {
+              errorMsg = "Error 404: File not found on source Drive. Skipped.";
+              nextStatus = "failed";
+            } else {
+              errorMsg = `Error: ${injectedFailure}`;
+              nextStatus = "failed";
+            }
+
+            await QueueStore.updateTask(task.id, { status: nextStatus, errorMsg });
+            return;
+          }
+
+          // Mark as copying
+          await QueueStore.updateTask(task.id, { status: "copying" });
+
+          const fileObj = files.find((f) => f.id === task.id);
+          const totalFileBytes = fileObj?.mimeType?.startsWith("application/vnd.google-apps.")
+            ? 0
+            : Number(fileObj?.size || 0);
+
+          if (totalFileBytes === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            await QueueStore.updateTask(task.id, {
+              status: "completed",
+              bytesCopied: 0,
+            });
+            return;
+          }
+
+          const steps = 3;
+          for (let step = 1; step <= steps; step++) {
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            if (!active) return;
+            const currentBytes = Math.floor((totalFileBytes / steps) * step);
+            await QueueStore.updateTask(task.id, {
+              bytesCopied: currentBytes,
+            });
+          }
+
+          setDestUsedBytes((prev) => Math.min(destLimitBytes, prev + totalFileBytes));
+          await QueueStore.updateTask(task.id, {
+            status: "completed",
+            bytesCopied: totalFileBytes,
+          });
+        });
+
+        await Promise.all(promises);
+        if (!active) return;
+
+        currentTasks = await QueueStore.getTasks();
+        if (queueState !== "copying") {
+          activeRun = false;
+        }
+      }
+    };
+
+    runQueue();
+
+    return () => {
+      active = false;
+    };
+  }, [queueState, selectedIds, files, destLimitBytes]);
 
   // ----------------------------------------------------
   // Master Sign-Out Handler (AUTH-07)
@@ -356,6 +471,11 @@ export default function BentoDashboard() {
     setGaugeState("partial");
     setResumeState("no-cursor");
     setSelectedIds(new Set());
+    setActiveFilters({
+      academic: false,
+      allStar: false,
+      cleanSlate: false,
+    });
   };
 
   // ----------------------------------------------------
@@ -379,7 +499,7 @@ export default function BentoDashboard() {
         setFolders(folderList);
       } catch (err) {
         console.warn(
-          "[BentoDashboard] Error hydating database state on mount:",
+          "[BentoDashboard] Error hydrating database state on mount:",
           err,
         );
       }
@@ -389,18 +509,128 @@ export default function BentoDashboard() {
     };
   }, [scanState]);
 
-  const totalSize = useMemo(
-    () => files.reduce((s, f) => s + Number(f.size || 0), 0),
-    [files],
-  );
-
-  const toggleSelected = (id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  // Subscribe to SelectionStore active selections to sync IndexedDB selections reactively
+  useEffect(() => {
+    const unsubscribe = SelectionStore.subscribe((selectionSet) => {
+      setSelectedIds(selectionSet);
     });
+    return unsubscribe;
+  }, []);
+
+  // Subscribe to QueueStore tasks to populate live transfer statuses
+  const [transferStatuses, setTransferStatuses] = useState({});
+  useEffect(() => {
+    const unsubscribe = QueueStore.subscribe((tasks) => {
+      const statusMap = {};
+      tasks.forEach((t) => {
+        statusMap[t.id] = {
+          status: t.status,
+          bytesCopied: t.bytesCopied,
+          errorMsg: t.errorMsg,
+        };
+      });
+      setTransferStatuses(statusMap);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Active filter state variables
+  const [activeFilters, setActiveFilters] = useState({
+    academic: false,
+    allStar: false,
+    cleanSlate: false,
+  });
+
+  const toggleFilter = (filterKey) => {
+    setActiveFilters((prev) => ({
+      ...prev,
+      [filterKey]: !prev[filterKey],
+    }));
+  };
+
+  // Compute live filtered explorer assets
+  const visibleFiles = useMemo(() => {
+    return applyFilters(files, activeFilters, folders);
+  }, [files, activeFilters, folders]);
+
+  // Compute total selected payload bytes. Google-native folders/files count as 0.
+  const projectedBytes = useMemo(() => {
+    let sum = 0;
+    for (const f of files) {
+      if (selectedIds.has(f.id)) {
+        const isNative = f.mimeType?.startsWith("application/vnd.google-apps.");
+        if (!isNative) {
+          sum += Number(f.size || 0);
+        }
+      }
+    }
+    return sum;
+  }, [files, selectedIds]);
+
+  const [destUsedBytes, setDestUsedBytes] = useState(5.2 * 1024 ** 3);
+  const [destLimitBytes, setDestLimitBytes] = useState(15 * 1024 ** 3);
+
+  // Synchronize dynamic quota limit presets with gaugeState toggles
+  useEffect(() => {
+    if (gaugeState === "empty") {
+      setDestUsedBytes(0);
+      setDestLimitBytes(15 * 1024 ** 3);
+    } else if (gaugeState === "partial") {
+      setDestUsedBytes(5.2 * 1024 ** 3);
+      setDestLimitBytes(15 * 1024 ** 3);
+    } else if (gaugeState === "projected") {
+      setDestUsedBytes(5.2 * 1024 ** 3);
+      setDestLimitBytes(15 * 1024 ** 3);
+    } else if (gaugeState === "over-quota") {
+      setDestUsedBytes(14.5 * 1024 ** 3);
+      setDestLimitBytes(15 * 1024 ** 3);
+    }
+  }, [gaugeState]);
+
+  // Live progress summary counts consumed by TransferPortal
+  const completedCount = useMemo(() => {
+    return Object.values(transferStatuses).filter(
+      (t) => selectedIds.has(t.id) && t.status === "completed",
+    ).length;
+  }, [transferStatuses, selectedIds]);
+
+  const failedCount = useMemo(() => {
+    return Object.values(transferStatuses).filter(
+      (t) => selectedIds.has(t.id) && t.status === "failed",
+    ).length;
+  }, [transferStatuses, selectedIds]);
+
+  const copiedSize = useMemo(() => {
+    return Object.values(transferStatuses).reduce(
+      (sum, t) => sum + (selectedIds.has(t.id) ? Number(t.bytesCopied || 0) : 0),
+      0,
+    );
+  }, [transferStatuses, selectedIds]);
+
+  const toggleSelected = async (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+      await SelectionStore.removeSelection(id);
+    } else {
+      next.add(id);
+      await SelectionStore.addSelection(id);
+    }
+  };
+
+  const toggleBulkSelect = async (idsArray, select) => {
+    const next = new Set(selectedIds);
+    if (select) {
+      idsArray.forEach((id) => next.add(id));
+    } else {
+      idsArray.forEach((id) => next.delete(id));
+    }
+    await SelectionStore.setSelection(next);
+  };
+
+  const handleReset = async () => {
+    setQueueState("idle");
+    await QueueStore.clear();
   };
 
   const handleStateChange = (slice, value) => {
@@ -523,7 +753,7 @@ export default function BentoDashboard() {
             UniVault
           </h1>
           <span style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
-            Phase 3 Oauth · {files.length.toLocaleString()} files · mock dataset
+            Phase 5 Core Migration Worker · {files.length.toLocaleString()} files
           </span>
         </div>
         {(sourceToken || destToken) && (
@@ -569,7 +799,7 @@ export default function BentoDashboard() {
             boxShadow: "0 0 15px rgba(139, 92, 246, 0.2)",
           }}
         >
-          <div style={{ display: "flex", flexDir: "column", gap: "2px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
             <div
               style={{
                 fontSize: "14px",
@@ -623,7 +853,7 @@ export default function BentoDashboard() {
 
       <ResumeBanner
         cursorPresent={resumeState === "cursor-present"}
-        remainingCount={42}
+        remainingCount={selectedIds.size - completedCount}
       />
 
       {/* Streaming Scan Progress Indicator (SCAN-01) */}
@@ -742,18 +972,21 @@ export default function BentoDashboard() {
           <SmartFilterButtons
             files={files}
             folders={folders}
-            onApply={(name) => console.log("apply filter", name)}
+            activeFilters={activeFilters}
+            onToggleFilter={toggleFilter}
           />
         </div>
 
         <div className="span-8">
           <FileExplorer
-            files={files}
+            files={visibleFiles}
             selectedIds={selectedIds}
             onToggle={toggleSelected}
+            onToggleBulk={toggleBulkSelect}
             scanState={scanState}
             onScan={setScanState}
             hasSourceToken={Boolean(sourceToken)}
+            transferStatuses={transferStatuses}
           />
         </div>
 
@@ -761,8 +994,24 @@ export default function BentoDashboard() {
           className="span-4"
           style={{ display: "flex", flexDirection: "column", gap: "16px" }}
         >
-          <StorageGauge state={gaugeState} />
-          <TransferPortal state={queueState} />
+          <StorageGauge
+            usedBytes={destUsedBytes}
+            limitBytes={destLimitBytes}
+            projectedBytes={projectedBytes}
+          />
+          <TransferPortal
+            state={queueState}
+            hasBothTokens={Boolean(sourceToken && destToken)}
+            selectedCount={selectedIds.size}
+            completedCount={completedCount}
+            failedCount={failedCount}
+            copiedSize={copiedSize}
+            totalSize={projectedBytes}
+            onStart={() => setPreflightOpen(true)}
+            onPause={() => setQueueState("paused")}
+            onResume={() => setQueueState("copying")}
+            onReset={handleReset}
+          />
         </div>
       </div>
 
@@ -774,8 +1023,8 @@ export default function BentoDashboard() {
           setDisclosureOpen(true);
         }}
         fileCount={selectedIds.size}
-        totalSize={totalSize}
-        destAvailable={58 * 1024 ** 3}
+        totalSize={projectedBytes}
+        destAvailable={Math.max(0, destLimitBytes - destUsedBytes)}
       />
 
       <DisclosureModal

@@ -1,19 +1,103 @@
-// FileExplorer — virtualized table backed by react-window (D-09).
-// Replaces the Plan 04 stub. Same prop contract: { files, selectedIds, onToggle }.
-// Phase 5 may swap react-window for @tanstack/virtual after a spike; the swap is local to this file.
+// FileExplorer — virtualized table backed by react-window (D-09, FILES-01..05).
+// Renders per-row statuses (pending | copying | completed | failed) synced reactively.
 import { FixedSizeList } from "react-window";
 import { useMemo, useState, useEffect, useRef } from "react";
 
-const ROW_HEIGHT = 36; // px — fixed per row (FixedSizeList requirement)
-const LIST_HEIGHT = 480; // px — viewport height; pages typically 13 rows visible
+const ROW_HEIGHT = 38; // px — fixed per row
+const LIST_HEIGHT = 480; // px — viewport height
 
 // Column widths sum approximately to the available width; grid template applied per row.
-const COL_TEMPLATE = "24px minmax(0, 1fr) 140px 80px";
+const COL_TEMPLATE = "24px minmax(0, 1.2fr) 95px 75px 120px";
+
+function ErrorDropdown({ errorMsg }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef(null);
+
+  // Close when clicking outside
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleOutsideClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [isOpen]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "relative",
+        display: "inline-block",
+      }}
+      onClick={(e) => e.stopPropagation()} // Prevent bubble toggle
+    >
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          color: "#f87171",
+          background: "rgba(239, 68, 68, 0.12)",
+          border: "1px solid rgba(239, 68, 68, 0.25)",
+          padding: "2px 8px",
+          borderRadius: "6px",
+          fontSize: "11px",
+          fontWeight: 600,
+          cursor: "pointer",
+          transition: "all 0.2s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(239, 68, 68, 0.2)";
+          e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.4)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(239, 68, 68, 0.12)";
+          e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.25)";
+        }}
+      >
+        <span style={{ fontSize: "10px" }}>⚠</span> Info
+      </button>
+
+      {isOpen && (
+        <div
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "24px",
+            zIndex: 100,
+            width: "240px",
+            padding: "10px 12px",
+            background: "rgba(20, 20, 25, 0.98)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(239, 68, 68, 0.4)",
+            borderRadius: "8px",
+            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.6)",
+            color: "#fca5a5",
+            fontSize: "11px",
+            lineHeight: 1.4,
+            textAlign: "left",
+          }}
+        >
+          {errorMsg}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Row({ index, style, data }) {
-  const { files, selectedIds, onToggle } = data;
+  const { files, selectedIds, onToggle, transferStatuses = {} } = data;
   const f = files[index];
   if (!f) return null;
+
   const sizeBytes = Number(f.size || 0);
   const sizeLabel =
     sizeBytes === 0
@@ -25,12 +109,101 @@ function Row({ index, style, data }) {
           : sizeBytes < 1024 * 1024 * 1024
             ? `${(sizeBytes / 1024 / 1024).toFixed(1)}M`
             : `${(sizeBytes / 1024 / 1024 / 1024).toFixed(2)}G`;
+
   const mimeShort = f.mimeType
     .replace("application/vnd.google-apps.", "")
     .replace("application/", "");
 
+  const transfer = transferStatuses[f.id];
+
+  const renderStatus = () => {
+    if (!transfer) return null;
+
+    switch (transfer.status) {
+      case "pending":
+        return (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              color: "var(--text-secondary)",
+              fontSize: "12px",
+            }}
+          >
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: "rgba(255, 255, 255, 0.25)",
+              }}
+            />
+            pending
+          </span>
+        );
+      case "copying":
+        return (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              color: "var(--accent-purple)",
+              fontSize: "12px",
+              fontWeight: 500,
+            }}
+          >
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: "var(--accent-purple)",
+                boxShadow: "0 0 6px var(--accent-purple)",
+                animation: "pulse 1.2s infinite ease-in-out",
+              }}
+            />
+            copying...
+          </span>
+        );
+      case "completed":
+        return (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              color: "var(--accent-neon)",
+              fontSize: "12px",
+              fontWeight: 500,
+            }}
+          >
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: "var(--accent-neon)",
+                boxShadow: "0 0 6px var(--accent-neon)",
+              }}
+            />
+            completed
+          </span>
+        );
+      case "failed":
+        return (
+          <ErrorDropdown
+            errorMsg={transfer.errorMsg || "Unknown Google API error."}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
-    <label
+    <div
       style={{
         ...style, // CRITICAL: positioning from react-window
         display: "grid",
@@ -41,7 +214,6 @@ function Row({ index, style, data }) {
         borderBottom: "1px solid var(--line-border)",
         color: "var(--text-primary)",
         fontSize: "13px",
-        cursor: "pointer",
         boxSizing: "border-box",
       }}
     >
@@ -49,6 +221,7 @@ function Row({ index, style, data }) {
         type="checkbox"
         checked={selectedIds.has(f.id)}
         onChange={() => onToggle(f.id)}
+        style={{ cursor: "pointer" }}
       />
       <span
         style={{
@@ -82,7 +255,8 @@ function Row({ index, style, data }) {
       >
         {sizeLabel}
       </span>
-    </label>
+      <div style={{ paddingLeft: "8px" }}>{renderStatus()}</div>
+    </div>
   );
 }
 
@@ -90,28 +264,32 @@ export default function FileExplorer({
   files = [],
   selectedIds = new Set(),
   onToggle = () => {},
+  onToggleBulk = () => {},
   scanState = "idle",
   onScan = null,
   hasSourceToken = false,
+  transferStatuses = {},
 }) {
   // Pass-through identity-stable data object to the FixedSizeList Row renderer.
   const itemData = useMemo(
-    () => ({ files, selectedIds, onToggle }),
-    [files, selectedIds, onToggle],
+    () => ({ files, selectedIds, onToggle, transferStatuses }),
+    [files, selectedIds, onToggle, transferStatuses],
   );
 
   // Bulk select-all / clear bar — operates on the currently-displayed slice (D-12: bulk select bar).
-  const allSelected = files.length > 0 && selectedIds.size === files.length;
+  const visibleSelectedCount = useMemo(() => {
+    let count = 0;
+    files.forEach((f) => {
+      if (selectedIds.has(f.id)) count++;
+    });
+    return count;
+  }, [files, selectedIds]);
+
+  const allSelected = files.length > 0 && visibleSelectedCount === files.length;
+
   const selectAll = () => {
-    if (allSelected) {
-      files.forEach((f) => {
-        if (selectedIds.has(f.id)) onToggle(f.id);
-      });
-    } else {
-      files.forEach((f) => {
-        if (!selectedIds.has(f.id)) onToggle(f.id);
-      });
-    }
+    const idsArray = files.map((f) => f.id);
+    onToggleBulk(idsArray, !allSelected);
   };
 
   // Width: track container width so FixedSizeList sizes correctly.
@@ -185,7 +363,7 @@ export default function FileExplorer({
             fontFamily: "var(--font-mono)",
           }}
         >
-          {files.length.toLocaleString()} rows ·{" "}
+          {files.length.toLocaleString()} rows visible ·{" "}
           {selectedIds.size.toLocaleString()} selected
         </span>
       </div>
@@ -207,9 +385,10 @@ export default function FileExplorer({
           checked={allSelected}
           onChange={selectAll}
           aria-label="Select all rows"
+          style={{ cursor: "pointer" }}
         />
         <span style={{ color: "var(--text-secondary)", fontSize: "12px" }}>
-          {allSelected ? "Clear all" : "Select all"}
+          {allSelected ? "Clear visible" : "Select all visible"}
         </span>
         {selectedIds.size > 0 && (
           <span
@@ -220,7 +399,7 @@ export default function FileExplorer({
               fontFamily: "var(--font-mono)",
             }}
           >
-            {selectedIds.size.toLocaleString()} selected
+            {selectedIds.size.toLocaleString()} selected total
           </span>
         )}
       </div>
@@ -243,6 +422,7 @@ export default function FileExplorer({
         <span>Name</span>
         <span>Type</span>
         <span style={{ textAlign: "right" }}>Size</span>
+        <span style={{ paddingLeft: "8px" }}>Status</span>
       </div>
 
       {/* Virtualized list */}
@@ -272,7 +452,7 @@ export default function FileExplorer({
               textAlign: "center",
             }}
           >
-            {files.length === 0 ? "No files loaded yet." : "Sizing…"}
+            {files.length === 0 ? "No files visible matching current filters." : "Sizing…"}
           </div>
         )}
       </div>
@@ -285,9 +465,9 @@ export default function FileExplorer({
           fontFamily: "var(--font-mono)",
         }}
       >
-        Virtualized via react-window (D-09). Phase 5 may swap to
-        @tanstack/virtual.
+        Virtualized via react-window (D-09) · Updates stored in IndexedDB (PERS-01).
       </div>
     </div>
   );
 }
+
