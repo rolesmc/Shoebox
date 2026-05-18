@@ -1,27 +1,34 @@
 // src/components/DevPanel.jsx
 // DEV-only toggle panel for Phase 0. Design notes:
 //   • No module-top throw — that would be a side effect and would block tree-shake.
-//   • DEV gate lives INSIDE the component function (early-return null in prod).
+//   • DEV gate lives INSIDE the component function, AFTER all hook calls (rules-of-hooks).
 //   • STATE_OPTIONS comes from './stateOptions.js' (NOT from BentoDashboard.jsx).
 //     This breaks the circular-import risk between composer and dev surface.
+//   • FAILURE_MODES is loaded via dynamic import so the static module graph stays
+//     mock-free; the Failure pill row is disabled until the import resolves so
+//     the first click cannot land on a no-op stub (W-02 fix).
 
-import { useState } from 'react';
-import { FAILURE_MODES, setFailureMode, getFailureMode } from '../mocks/failureInjection.js';
+import { useState, useEffect } from 'react';
 import { STATE_OPTIONS } from './stateOptions.js';
 
 const ROW = { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' };
 const LABEL = { color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: '70px' };
 
-function TogglePill({ active, onClick, children }) {
+function TogglePill({ active, onClick, children, disabled = false, className }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      className={className}
       style={{
         padding: '4px 10px', fontSize: '11px', fontFamily: 'var(--font-mono)',
         background: active ? 'var(--accent-neon)' : 'transparent',
         color: active ? '#000' : 'var(--text-secondary)',
         border: `1px solid ${active ? 'var(--accent-neon)' : 'var(--line-border)'}`,
-        borderRadius: '999px', cursor: 'pointer',
+        borderRadius: '999px',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        pointerEvents: disabled ? 'none' : 'auto',
       }}
     >
       {children}
@@ -38,18 +45,40 @@ export default function DevPanel({
   datasetSize, onDatasetSize,
   onOpenPreflight, onOpenDisclosure,
 }) {
-  // In-function DEV gate — replaces the original Plan 04's module-top throw.
-  // Vite substitutes import.meta.env.DEV at build time; in prod this becomes
-  // `if (!false) return null;` which is dead-code-eliminated along with the
-  // entire component body. Combined with the JSX guard in BentoDashboard and
-  // package.json `sideEffects: false`, the whole DevPanel module is dropped.
+  // Lazy-load failureInjection so the prod static graph never references it.
+  // While DevPanel is JSX-gated out of prod by BentoDashboard, this also
+  // keeps DevPanel's own module graph mock-free for defense in depth.
+  const [failureModes, setFailureModes] = useState([]);
+  const [failureMode, setFailureModeLocal] = useState('none');
+  const [setFailureModeFn, setSetFailureModeFn] = useState(() => () => {});
+  // W-02 fix: gate Failure-row pills until the dynamic import resolves
+  // so the first click cannot land on the no-op stub.
+  const [failureApiReady, setFailureApiReady] = useState(false);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    let cancelled = false;
+    (async () => {
+      const mod = await import('../mocks/failureInjection.js');
+      if (cancelled) return;
+      setFailureModes(mod.FAILURE_MODES);
+      setFailureModeLocal(mod.getFailureMode());
+      // Wrap in arrow to avoid useState's function-call-on-init footgun.
+      setSetFailureModeFn(() => mod.setFailureMode);
+      setFailureApiReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // In-function DEV gate — placed AFTER all hook calls so React's rules-of-hooks
+  // are satisfied. Vite substitutes import.meta.env.DEV at build time; in prod
+  // this becomes `if (!false) return null;` which is dead-code-eliminated along
+  // with the entire component body.
   if (!import.meta.env.DEV) return null;
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const [failureMode, setFailureModeLocal] = useState(getFailureMode());
-
   const applyFailureMode = (mode) => {
-    setFailureMode(mode);
+    if (!failureApiReady) return;
+    setFailureModeFn(mode);
     setFailureModeLocal(mode);
   };
 
@@ -98,8 +127,16 @@ export default function DevPanel({
         </div>
         <div style={ROW}>
           <span style={LABEL}>Failure</span>
-          {FAILURE_MODES.map((m) => (
-            <TogglePill key={m} active={failureMode === m} onClick={() => applyFailureMode(m)}>{m}</TogglePill>
+          {failureModes.map((m) => (
+            <TogglePill
+              key={m}
+              active={failureMode === m}
+              onClick={() => applyFailureMode(m)}
+              disabled={!failureApiReady}
+              className={!failureApiReady ? 'pill-disabled' : undefined}
+            >
+              {m}
+            </TogglePill>
           ))}
         </div>
         <div style={ROW}>
