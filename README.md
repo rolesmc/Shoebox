@@ -57,10 +57,10 @@ After `npm run dev`, open `http://localhost:5188` and verify:
    Dataset × 4). Each toggle should update the corresponding
    component without console errors.
 3. **10k-row FileExplorer scroll smoothness**: click `Dataset →
-   10,000 rows` in the DevPanel. Scroll the FileExplorer with the
+10,000 rows` in the DevPanel. Scroll the FileExplorer with the
    mouse wheel from top to bottom while Chrome DevTools →
    Performance is recording (5-second capture). Acceptance:
-     - Scroll feels smooth (no perceptible jank).
-     - Performance flame-graph shows no frames longer than ~50ms.
-     - DOM inspection of the row container shows ~15-25
-       `<div role="row">` (or `<label>`) row elements, NOT 10,000.
+   - Scroll feels smooth (no perceptible jank).
+   - Performance flame-graph shows no frames longer than ~50ms.
+   - DOM inspection of the row container shows ~15-25
+     `<div role="row">` (or `<label>`) row elements, NOT 10,000.
