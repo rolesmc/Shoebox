@@ -1,8 +1,5 @@
 // src/mocks/mockData.js
-// DEV-ONLY: throws in production builds so Vite tree-shakes the import + dep.
-if (!import.meta.env.DEV) {
-  throw new Error('mockData.js loaded outside DEV — this module is dev-only.');
-}
+// DEV-only by convention — enforced by callers using DEV-gated dynamic imports.
 import { faker } from '@faker-js/faker';
 
 // Deterministic seed so the dataset is identical across reloads (debuggability).

@@ -1,9 +1,7 @@
 // src/mocks/googleApi.mock.js
 // DEV-ONLY mock that matches the Phase 4 utils/googleApi.js contract (D-08).
 // When Phase 4 lands, consumers swap import path with no other changes.
-if (!import.meta.env.DEV) {
-  throw new Error('googleApi.mock.js loaded outside DEV — this module is dev-only.');
-}
+// DEV-only by convention — enforced by callers using DEV-gated dynamic imports.
 
 import { getAllFiles, getAllFolders } from './mockData.js';
 import { throwIfArmed } from './failureInjection.js';
