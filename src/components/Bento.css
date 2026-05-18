@@ -1,0 +1,30 @@
+/* Bento grid layout for BentoDashboard. */
+.bento-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.bento-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+}
+
+.bento-grid > .span-6  { grid-column: span 6;  }
+.bento-grid > .span-12 { grid-column: span 12; }
+.bento-grid > .span-8  { grid-column: span 8;  }
+.bento-grid > .span-4  { grid-column: span 4;  }
+
+@media (max-width: 900px) {
+  .bento-grid > .span-6,
+  .bento-grid > .span-8,
+  .bento-grid > .span-4 { grid-column: span 12; }
+}
