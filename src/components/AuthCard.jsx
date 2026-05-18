@@ -8,7 +8,7 @@ const LABEL = {
   dest: "Personal Account (Destination)",
 };
 
-export default function AuthCard({ account, state, email }) {
+export default function AuthCard({ account, state, email, onConnect }) {
   const isConnected = state === "connected";
   const isExpired = state === "expired";
   const Icon = isConnected ? CheckCircle : isExpired ? AlertTriangle : CloudOff;
@@ -19,7 +19,7 @@ export default function AuthCard({ account, state, email }) {
       : "var(--text-secondary)";
 
   return (
-    <div className="glass-card" style={{ padding: "20px", minHeight: "120px" }}>
+    <div className="glass-card" style={{ padding: "20px", minHeight: "135px" }}>
       <div
         style={{
           display: "flex",
@@ -68,6 +68,7 @@ export default function AuthCard({ account, state, email }) {
               color: "var(--text-primary)",
               fontSize: "15px",
               fontWeight: 500,
+              opacity: 0.7,
             }}
           >
             {email || "unknown@example.com"}
@@ -77,10 +78,33 @@ export default function AuthCard({ account, state, email }) {
               color: "var(--accent-purple)",
               fontSize: "12px",
               marginTop: "4px",
+              marginBottom: "8px",
             }}
           >
             Session expired — reconnect to resume
           </div>
+          <button
+            style={{
+              marginTop: "4px",
+              padding: "6px 12px",
+              background: "rgba(139, 92, 246, 0.15)",
+              color: "var(--accent-purple)",
+              border: "1px solid var(--accent-purple)",
+              borderRadius: "8px",
+              fontWeight: 600,
+              fontSize: "12px",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(139, 92, 246, 0.25)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(139, 92, 246, 0.15)";
+            }}
+            onClick={onConnect}
+          >
+            Reconnect
+          </button>
         </>
       ) : (
         <button
@@ -93,10 +117,15 @@ export default function AuthCard({ account, state, email }) {
             borderRadius: "12px",
             fontWeight: 600,
             fontSize: "14px",
+            transition: "all 0.2s",
           }}
-          onClick={() =>
-            alert(`Connect ${account} — Phase 3 implements GIS OAuth`)
-          }
+          onMouseEnter={(e) => {
+            e.currentTarget.style.filter = "brightness(1.1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.filter = "none";
+          }}
+          onClick={onConnect}
         >
           Connect {account === "source" ? "School" : "Personal"} Account
         </button>

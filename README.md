@@ -64,3 +64,19 @@ After `npm run dev`, open `http://localhost:5188` and verify:
    - Performance flame-graph shows no frames longer than ~50ms.
    - DOM inspection of the row container shows ~15-25
      `<div role="row">` (or `<label>`) row elements, NOT 10,000.
+
+## Google Identity Services (GIS) & OAuth Consent Details
+
+UniVault utilizes direct standard client-side browser popups for OAuth2 authorization flows.
+
+### OAuth Scopes
+- **School Account (Source):** `https://www.googleapis.com/auth/drive.readonly` and `https://www.googleapis.com/auth/userinfo.email`
+- **Personal Account (Destination):** `https://www.googleapis.com/auth/drive.file` and `https://www.googleapis.com/auth/userinfo.email`
+
+### Testing User Caps & Verification Warnings
+Google Workspace restricts access to "unverified apps" requesting sensitive/restricted scopes (like Google Drive). During local development and testing:
+1. **Unverified App Warning:** When logging in, Google will show a screen saying "Google hasn't verified this app."
+   - *Resolution:* Click **Advanced** and then click **Go to UniVault (unsafe)** to proceed to the consent dialog.
+2. **Testing User Limit (Cap):** While the app is in the "Testing" publishing status inside the Google Cloud Console, Google enforces a limit of **100 OAuth testing users**.
+   - *Action:* If a new testing user receives a `403 Access Blocked: project_id_limit` error, ensure their Google account is added explicitly under the **OAuth consent screen -> Test users** list in the Google Cloud Console.
+
