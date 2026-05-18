@@ -1,4 +1,4 @@
-// PreflightModal — gate before migration starts (PRE-01..03). Phase 5 makes it a hard gate.
+// PreflightModal — pre-flight gate validation (PRE-01, PRE-02).
 export default function PreflightModal({
   isOpen = false,
   onClose = () => {},
@@ -19,7 +19,8 @@ export default function PreflightModal({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.6)",
+        background: "rgba(0, 0, 0, 0.75)",
+        backdropFilter: "blur(12px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -28,60 +29,107 @@ export default function PreflightModal({
     >
       <div
         className="glass-card"
-        style={{ padding: "28px", width: "min(520px, 90vw)" }}
+        style={{
+          padding: "28px",
+          width: "min(520px, 90vw)",
+          boxShadow: "0 20px 40px rgba(0, 0, 0, 0.5)",
+          border: "1px solid rgba(255, 255, 255, 0.1)",
+        }}
       >
-        <h2 style={{ marginTop: 0, color: "var(--text-primary)" }}>
-          Pre-flight check
+        <h2
+          style={{
+            marginTop: 0,
+            color: "var(--text-primary)",
+            fontSize: "20px",
+            fontWeight: 600,
+          }}
+        >
+          Pre-flight Checklist
         </h2>
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            fontSize: "14px",
+            lineHeight: 1.5,
+          }}
+        >
+          Verify your migration footprint prior to establishing the copy pool:
+        </p>
         <ul
           style={{
             color: "var(--text-primary)",
-            lineHeight: 1.7,
+            lineHeight: 1.8,
             paddingLeft: "20px",
+            fontSize: "14px",
           }}
         >
           <li>
-            <b>{fileCount.toLocaleString()}</b> files selected
+            Selected Items:{" "}
+            <b style={{ color: "var(--accent-neon)" }}>
+              {fileCount.toLocaleString()}
+            </b>{" "}
+            files
           </li>
           <li>
-            Total size: <b>{sizeGB.toFixed(1)} GB</b> (Google-native files count
-            as 0)
+            Migration Payload:{" "}
+            <b style={{ color: "var(--accent-purple)" }}>
+              {sizeGB < 0.1 && sizeGB > 0 ? sizeGB.toFixed(3) : sizeGB.toFixed(1)}{" "}
+              GB
+            </b>
           </li>
           <li>
-            Destination headroom: <b>{availGB.toFixed(1)} GB</b>
+            Destination Headroom: <b>{availGB.toFixed(1)} GB</b> available
           </li>
         </ul>
+
         {over700 && (
           <div
             style={{
-              marginTop: "12px",
-              padding: "12px",
+              marginTop: "16px",
+              padding: "14px",
               borderRadius: "12px",
-              background: "rgba(139, 92, 246, 0.15)",
-              color: "var(--accent-purple)",
+              background: "rgba(239, 68, 68, 0.15)",
+              border: "1px solid rgba(239, 68, 68, 0.3)",
+              color: "#f87171",
               fontSize: "13px",
+              lineHeight: 1.5,
             }}
           >
-            ⚠ Your selection is approaching the 750 GB/day per-account copy cap
-            enforced by Google. Migration may need to run across multiple days.
+            ⚠ <b>Attention:</b> Your selection exceeds 700 GB. This is very close
+            to Google's daily per-account transfer restriction limit (750 GB).
+            UniVault will copy up to the daily cap and pause, allowing you to
+            resume tomorrow without duplicate effort.
           </div>
         )}
+
         <div
           style={{
             display: "flex",
-            gap: "8px",
+            gap: "12px",
             justifyContent: "flex-end",
-            marginTop: "20px",
+            marginTop: "24px",
           }}
         >
           <button
             onClick={onClose}
             style={{
-              padding: "10px 16px",
+              padding: "10px 18px",
               background: "transparent",
               color: "var(--text-secondary)",
               border: "1px solid var(--line-border)",
               borderRadius: "10px",
+              fontSize: "13px",
+              fontWeight: 500,
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "#fff";
+              e.currentTarget.style.borderColor = "rgba(255,255,255,0.3)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-secondary)";
+              e.currentTarget.style.borderColor = "var(--line-border)";
             }}
           >
             Cancel
@@ -89,12 +137,24 @@ export default function PreflightModal({
           <button
             onClick={onConfirm}
             style={{
-              padding: "10px 16px",
+              padding: "10px 18px",
               background: "var(--accent-neon)",
               color: "#000",
               border: "none",
               borderRadius: "10px",
               fontWeight: 600,
+              fontSize: "13px",
+              cursor: "pointer",
+              boxShadow: "0 0 12px rgba(16, 185, 129, 0.3)",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow =
+                "0 0 18px rgba(16, 185, 129, 0.5)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow =
+                "0 0 12px rgba(16, 185, 129, 0.3)";
             }}
           >
             Start migration
@@ -104,3 +164,4 @@ export default function PreflightModal({
     </div>
   );
 }
+
