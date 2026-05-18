@@ -16,20 +16,21 @@
     "smoke:prod": "node scripts/smoke-prod.mjs"
   },
   "dependencies": {
+    "canvas-confetti": "^1.9.4",
+    "lucide-react": "^0.460.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "lucide-react": "^0.460.0",
-    "react-window": "^1.8.10",
-    "canvas-confetti": "^1.9.4"
+    "react-window": "^1.8.10"
   },
   "devDependencies": {
-    "@faker-js/faker": "^9.0.0",
     "@eslint/js": "^9.0.0",
+    "@faker-js/faker": "^9.0.0",
     "@vitejs/plugin-react": "^6.0.0",
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.0",
     "globals": "^15.0.0",
+    "jsdom": "^29.1.1",
     "prettier": "^3.3.0",
     "vite": "^8.0.13"
   }
