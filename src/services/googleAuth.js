@@ -3,12 +3,12 @@
 
 const SOURCE_SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/userinfo.email"
+  "https://www.googleapis.com/auth/userinfo.email",
 ].join(" ");
 
 const DEST_SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/userinfo.email"
+  "https://www.googleapis.com/auth/userinfo.email",
 ].join(" ");
 
 let sourceClient = null;
@@ -28,7 +28,8 @@ export const GoogleAuth = {
     registeredCallbacks = callbacks;
 
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    const hasGsi = typeof window !== "undefined" && window.google?.accounts?.oauth2;
+    const hasGsi =
+      typeof window !== "undefined" && window.google?.accounts?.oauth2;
 
     if (clientId && hasGsi) {
       isRealOAuth = true;
@@ -43,7 +44,8 @@ export const GoogleAuth = {
               return;
             }
             if (response.access_token) {
-              const expiresAt = Date.now() + (parseInt(response.expires_in, 10) || 3600) * 1000;
+              const expiresAt =
+                Date.now() + (parseInt(response.expires_in, 10) || 3600) * 1000;
               callbacks.onSourceSuccess({
                 token: response.access_token,
                 expiresAt,
@@ -62,7 +64,8 @@ export const GoogleAuth = {
               return;
             }
             if (response.access_token) {
-              const expiresAt = Date.now() + (parseInt(response.expires_in, 10) || 3600) * 1000;
+              const expiresAt =
+                Date.now() + (parseInt(response.expires_in, 10) || 3600) * 1000;
               callbacks.onDestSuccess({
                 token: response.access_token,
                 expiresAt,
@@ -71,15 +74,20 @@ export const GoogleAuth = {
           },
         });
 
-        console.log("UniVault: Real Google Identity Services clients initialized successfully.");
+        console.log(
+          "UniVault: Real Google Identity Services clients initialized successfully.",
+        );
       } catch (err) {
-        console.error("UniVault: Failed to initialize GIS client. Falling back to mock.", err);
+        console.error(
+          "UniVault: Failed to initialize GIS client. Falling back to mock.",
+          err,
+        );
         isRealOAuth = false;
       }
     } else {
       isRealOAuth = false;
       console.log(
-        `UniVault: Running in Offline/Mock auth mode. (Has GSI script: ${!!hasGsi}, Client ID defined: ${!!clientId})`
+        `UniVault: Running in Offline/Mock auth mode. (Has GSI script: ${!!hasGsi}, Client ID defined: ${!!clientId})`,
       );
     }
   },
@@ -125,20 +133,28 @@ export const GoogleAuth = {
     }
 
     try {
-      const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-        headers: {
-          Authorization: `Bearer ${token}`,
+      const response = await fetch(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
-      });
+      );
 
       if (!response.ok) {
-        throw new Error(`Userinfo request failed with status: ${response.status}`);
+        throw new Error(
+          `Userinfo request failed with status: ${response.status}`,
+        );
       }
 
       const data = await response.json();
       return data.email || "";
     } catch (err) {
-      console.error("UniVault: Failed to retrieve user email via OAuth Userinfo.", err);
+      console.error(
+        "UniVault: Failed to retrieve user email via OAuth Userinfo.",
+        err,
+      );
       throw err;
     }
   },

@@ -20,7 +20,7 @@ import DevPanel from "./DevPanel.jsx";
 import { GoogleAuth } from "../services/googleAuth.js";
 import { TokenStorage } from "../services/storage.js";
 import MockLoginModal from "./MockLoginModal.jsx";
-import { clearAllData } from "../services/db.js";
+import { clearAllData, FileStore } from "../services/db.js";
 
 // Neutral STATE_OPTIONS module
 import { STATE_OPTIONS } from "./stateOptions.js";
@@ -28,13 +28,15 @@ import { STATE_OPTIONS } from "./stateOptions.js";
 export default function BentoDashboard() {
   // Retrieve persisted tokens synchronously during instantiation (AUTH-04 zero visual flash)
   const [credentials] = useState(() => TokenStorage.getCredentials());
-  
+
   // Isolated credential and profile states
   const [sourceToken, setSourceToken] = useState(() => credentials.sourceToken);
   const [sourceEmail, setSourceEmail] = useState(() => credentials.sourceEmail);
   const [destToken, setDestToken] = useState(() => credentials.destToken);
   const [destEmail, setDestEmail] = useState(() => credentials.destEmail);
-  const [tokenExpiresAt, setTokenExpiresAt] = useState(() => credentials.tokenExpiresAt);
+  const [tokenExpiresAt, setTokenExpiresAt] = useState(
+    () => credentials.tokenExpiresAt,
+  );
   const [showExpiryWarning, setShowExpiryWarning] = useState(false);
   const [isSessionExpired, setIsSessionExpired] = useState(false);
 
@@ -50,7 +52,7 @@ export default function BentoDashboard() {
     if (creds.destToken) return "dest-only";
     return "disconnected";
   });
-  
+
   const [scanState, setScanState] = useState("idle");
   const [queueState, setQueueState] = useState("idle");
   const [gaugeState, setGaugeState] = useState("partial");
@@ -59,6 +61,8 @@ export default function BentoDashboard() {
   // Files data states
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
+  const [scannedCount, setScannedCount] = useState(0);
+  const [skippedSharedDrivesCount, setSkippedSharedDrivesCount] = useState(0);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [datasetSize, setDatasetSize] = useState(500);
 
@@ -95,7 +99,10 @@ export default function BentoDashboard() {
           setMockModalOpen(false);
           console.log(`[GoogleAuth] Connected Destination: ${email}`);
         } catch (err) {
-          console.error("Destination login failed in email identity fetch:", err);
+          console.error(
+            "Destination login failed in email identity fetch:",
+            err,
+          );
         }
       },
       onError: (err) => {
@@ -116,7 +123,9 @@ export default function BentoDashboard() {
       if (tokenExpiresAt) {
         const msRemaining = tokenExpiresAt - Date.now();
         if (msRemaining <= 0) {
-          console.log("[BentoDashboard] Access tokens expired! Invalidating session.");
+          console.log(
+            "[BentoDashboard] Access tokens expired! Invalidating session.",
+          );
           setIsSessionExpired(true);
           setShowExpiryWarning(false);
           setAuthState("expired");
@@ -160,7 +169,19 @@ export default function BentoDashboard() {
     } else {
       setAuthState("disconnected");
     }
-  }, [sourceToken, destToken, isSessionExpired]);
+  }, [sourceToken, destToken, isSessionExpired, authState]);
+
+  // ----------------------------------------------------
+  // Automatic scan trigger when source token is loaded (SCAN-01)
+  // ----------------------------------------------------
+  useEffect(() => {
+    if (sourceToken && scanState === "idle" && files.length === 0) {
+      console.log(
+        "[BentoDashboard] Source token connected and no files in cache. Auto-triggering scan...",
+      );
+      setScanState("scanning");
+    }
+  }, [sourceToken, scanState, files.length]);
 
   // ----------------------------------------------------
   // Dynamic AuthCard props generation
@@ -182,23 +203,32 @@ export default function BentoDashboard() {
         email: destEmail,
       },
     };
-  }, [authState, isSessionExpired, sourceToken, sourceEmail, destToken, destEmail]);
+  }, [
+    authState,
+    isSessionExpired,
+    sourceToken,
+    sourceEmail,
+    destToken,
+    destEmail,
+  ]);
 
   // ----------------------------------------------------
   // 401 Interception & Exception Handling (AUTH-06)
   // ----------------------------------------------------
   const handleApiError = async (err) => {
     if (err.status === 401 || err.errors?.[0]?.reason === "authError") {
-      console.error("[BentoDashboard] Caught 401 Unauthorized API error! Freezing transfer queue & flushes...");
-      
+      console.error(
+        "[BentoDashboard] Caught 401 Unauthorized API error! Freezing transfer queue & flushes...",
+      );
+
       // Pause active transfers
       setQueueState("paused");
-      
+
       // Force expired credentials state
       setIsSessionExpired(true);
       setShowExpiryWarning(false);
       setAuthState("expired");
-      
+
       // Clear persistent and transient keys
       setSourceToken(null);
       setSourceEmail(null);
@@ -206,7 +236,7 @@ export default function BentoDashboard() {
       setDestEmail(null);
       setTokenExpiresAt(null);
       TokenStorage.clearAll();
-      
+
       // Mark resumption as present
       setResumeState("cursor-present");
     } else {
@@ -215,26 +245,60 @@ export default function BentoDashboard() {
   };
 
   // ----------------------------------------------------
-  // Simulated File Listing / Scanning Task progress
+  // Streaming File Listing / Scanning Task progress (SCAN-01 to SCAN-04)
   // ----------------------------------------------------
   useEffect(() => {
     if (scanState !== "scanning") return;
 
-    let timerId = setTimeout(async () => {
+    let active = true;
+    (async () => {
       try {
-        if (import.meta.env.DEV) {
-          const { throwIfArmed } = await import("../mocks/failureInjection.js");
-          throwIfArmed();
-        }
+        setScannedCount(0);
+        setSkippedSharedDrivesCount(0);
+
+        // Dynamically import to ensure clean modular bundling
+        const { scanDrive } = await import("../services/scanner.js");
+
+        await scanDrive({
+          token: sourceToken,
+          onProgress: (scanned, skipped) => {
+            if (!active) return;
+            setScannedCount(scanned);
+            setSkippedSharedDrivesCount(skipped);
+          },
+          onPage: async () => {
+            if (!active) return;
+
+            // Read streamed files incrementally from IndexedDB
+            const loadedFiles = await FileStore.getAllFiles();
+            if (!active) return;
+
+            const fileList = loadedFiles.filter(
+              (f) => f.mimeType !== "application/vnd.google-apps.folder",
+            );
+            const folderList = loadedFiles.filter(
+              (f) => f.mimeType === "application/vnd.google-apps.folder",
+            );
+
+            setFiles(fileList);
+            setFolders(folderList);
+          },
+        });
+
+        if (!active) return;
         setScanState("done");
       } catch (err) {
+        if (!active) return;
+        console.error("[BentoDashboard] Real-time scan failure caught:", err);
         await handleApiError(err);
         setScanState("idle");
       }
-    }, 2000);
+    })();
 
-    return () => clearTimeout(timerId);
-  }, [scanState]);
+    return () => {
+      active = false;
+    };
+  }, [scanState, sourceToken]);
 
   // ----------------------------------------------------
   // Simulated Copy Queue Progression & Interruption (Task 4)
@@ -266,11 +330,13 @@ export default function BentoDashboard() {
   // Master Sign-Out Handler (AUTH-07)
   // ----------------------------------------------------
   const handleSignOut = async () => {
-    console.log("[BentoDashboard] Executing sign out: flushing credentials and storage...");
-    
+    console.log(
+      "[BentoDashboard] Executing sign out: flushing credentials and storage...",
+    );
+
     // Clear tokens in storage
     TokenStorage.clearAll();
-    
+
     // Reset IndexedDB tables
     await clearAllData();
 
@@ -293,57 +359,40 @@ export default function BentoDashboard() {
   };
 
   // ----------------------------------------------------
-  // DEV-only mock data populators
+  // Persistent Storage Initial & Dynamic Hydration (PERS-01)
   // ----------------------------------------------------
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    let cancelled = false;
+    let active = true;
     (async () => {
       try {
-        const { getAllFiles, getAllFolders } = await import("../mocks/mockData.js");
-        if (cancelled) return;
-        setFiles(getAllFiles());
-        setFolders(getAllFolders());
-        
-        const { listFiles } = await import("../mocks/googleApi.mock.js");
-        const acc = [];
-        let pageToken;
-        do {
-          const page = await listFiles({ pageToken });
-          acc.push(...page.files);
-          pageToken = page.nextPageToken;
-        } while (pageToken);
-        if (cancelled) return;
-        setFiles(acc);
+        const loadedFiles = await FileStore.getAllFiles();
+        if (!active) return;
+
+        const fileList = loadedFiles.filter(
+          (f) => f.mimeType !== "application/vnd.google-apps.folder",
+        );
+        const folderList = loadedFiles.filter(
+          (f) => f.mimeType === "application/vnd.google-apps.folder",
+        );
+
+        setFiles(fileList);
+        setFolders(folderList);
       } catch (err) {
-        console.warn("[BentoDashboard] DEV mock load failed:", err);
+        console.warn(
+          "[BentoDashboard] Error hydating database state on mount:",
+          err,
+        );
       }
     })();
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, []);
+  }, [scanState]);
 
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    let cancelled = false;
-    (async () => {
-      const { getAllFiles, getStressFiles } = await import("../mocks/mockData.js");
-      if (cancelled) return;
-      if (datasetSize <= 500) {
-        setFiles(getAllFiles());
-      } else {
-        setFiles(getStressFiles(datasetSize));
-      }
-      if (cancelled) return;
-      setSelectedIds(new Set());
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [datasetSize]);
-
-  const totalSize = useMemo(() => files.reduce((s, f) => s + Number(f.size || 0), 0), [files]);
+  const totalSize = useMemo(
+    () => files.reduce((s, f) => s + Number(f.size || 0), 0),
+    [files],
+  );
 
   const toggleSelected = (id) => {
     setSelectedIds((prev) => {
@@ -374,7 +423,11 @@ export default function BentoDashboard() {
       setIsSessionExpired(false);
       setShowExpiryWarning(false);
       setTokenExpiresAt(Date.now() + 3600 * 1000);
-      TokenStorage.saveSourceCredentials("mock_source_token_dev", "student@school.edu", Date.now() + 3600 * 1000);
+      TokenStorage.saveSourceCredentials(
+        "mock_source_token_dev",
+        "student@school.edu",
+        Date.now() + 3600 * 1000,
+      );
       TokenStorage.saveDestCredentials("mock_dest_token_dev", "me@gmail.com");
     } else if (value === "source-only") {
       setSourceToken("mock_source_token_dev");
@@ -384,7 +437,11 @@ export default function BentoDashboard() {
       setIsSessionExpired(false);
       setShowExpiryWarning(false);
       setTokenExpiresAt(Date.now() + 3600 * 1000);
-      TokenStorage.saveSourceCredentials("mock_source_token_dev", "student@school.edu", Date.now() + 3600 * 1000);
+      TokenStorage.saveSourceCredentials(
+        "mock_source_token_dev",
+        "student@school.edu",
+        Date.now() + 3600 * 1000,
+      );
       localStorage.removeItem("univault_dest_token");
       localStorage.removeItem("univault_dest_email");
     } else if (value === "dest-only") {
@@ -406,7 +463,11 @@ export default function BentoDashboard() {
       setIsSessionExpired(true);
       setShowExpiryWarning(false);
       setTokenExpiresAt(Date.now() - 1000);
-      TokenStorage.saveSourceCredentials("mock_source_token_dev", "student@school.edu", Date.now() - 1000);
+      TokenStorage.saveSourceCredentials(
+        "mock_source_token_dev",
+        "student@school.edu",
+        Date.now() - 1000,
+      );
       TokenStorage.saveDestCredentials("mock_dest_token_dev", "me@gmail.com");
     } else {
       setSourceToken(null);
@@ -443,9 +504,22 @@ export default function BentoDashboard() {
 
   return (
     <div className="bento-shell">
-      <header className="bento-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <header
+        className="bento-header"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
         <div>
-          <h1 style={{ margin: 0, fontSize: "24px", color: "var(--text-primary)" }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "24px",
+              color: "var(--text-primary)",
+            }}
+          >
             UniVault
           </h1>
           <span style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
@@ -496,11 +570,18 @@ export default function BentoDashboard() {
           }}
         >
           <div style={{ display: "flex", flexDir: "column", gap: "2px" }}>
-            <div style={{ fontSize: "14px", fontWeight: 500, color: "var(--text-primary)" }}>
+            <div
+              style={{
+                fontSize: "14px",
+                fontWeight: 500,
+                color: "var(--text-primary)",
+              }}
+            >
               Session Expiration Warning
             </div>
             <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-              Your transfer credentials will expire in less than 10 minutes. Reconnect now to ensure continuous background operations.
+              Your transfer credentials will expire in less than 10 minutes.
+              Reconnect now to ensure continuous background operations.
             </div>
           </div>
           <button
@@ -545,12 +626,116 @@ export default function BentoDashboard() {
         remainingCount={42}
       />
 
+      {/* Streaming Scan Progress Indicator (SCAN-01) */}
+      {scanState === "scanning" && (
+        <div
+          className="glass-card"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            padding: "16px",
+            marginBottom: "16px",
+            borderLeft: "4px solid var(--accent-purple)",
+            background: "rgba(139, 92, 246, 0.1)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "14px",
+                fontWeight: 600,
+                color: "var(--text-primary)",
+              }}
+            >
+              Scanning Google Drive (My Drive)...
+            </span>
+            <span
+              style={{
+                fontSize: "12px",
+                fontFamily: "var(--font-mono)",
+                color: "var(--text-secondary)",
+              }}
+            >
+              {scannedCount.toLocaleString()} items discovered
+            </span>
+          </div>
+          <div
+            style={{
+              height: "4px",
+              width: "100%",
+              background: "rgba(255,255,255,0.08)",
+              borderRadius: "2px",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: "40%",
+                background:
+                  "linear-gradient(90deg, var(--accent-purple), var(--accent-neon))",
+                borderRadius: "2px",
+                animation: "shimmer 1.5s infinite linear",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Shared Drive Skipped Banner (SCAN-04) */}
+      {skippedSharedDrivesCount > 0 && (
+        <div
+          className="glass-card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            padding: "12px 16px",
+            marginBottom: "16px",
+            borderLeft: "4px solid var(--accent-purple)",
+            background: "rgba(139, 92, 246, 0.08)",
+          }}
+        >
+          <span style={{ fontSize: "16px" }}>ℹ️</span>
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "var(--text-primary)",
+              }}
+            >
+              Shared Drive Items Skipped
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+              {skippedSharedDrivesCount} Shared Drive files were skipped because
+              UniVault only supports migrating "My Drive" assets.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bento-grid">
         <div className="span-6">
-          <AuthCard account="source" {...cards.source} onConnect={() => GoogleAuth.connectSource()} />
+          <AuthCard
+            account="source"
+            {...cards.source}
+            onConnect={() => GoogleAuth.connectSource()}
+          />
         </div>
         <div className="span-6">
-          <AuthCard account="dest" {...cards.dest} onConnect={() => GoogleAuth.connectDest()} />
+          <AuthCard
+            account="dest"
+            {...cards.dest}
+            onConnect={() => GoogleAuth.connectDest()}
+          />
         </div>
 
         <div className="span-12">
@@ -566,6 +751,9 @@ export default function BentoDashboard() {
             files={files}
             selectedIds={selectedIds}
             onToggle={toggleSelected}
+            scanState={scanState}
+            onScan={setScanState}
+            hasSourceToken={Boolean(sourceToken)}
           />
         </div>
 
@@ -589,7 +777,7 @@ export default function BentoDashboard() {
         totalSize={totalSize}
         destAvailable={58 * 1024 ** 3}
       />
-      
+
       <DisclosureModal
         isOpen={disclosureOpen}
         onClose={() => setDisclosureOpen(false)}
