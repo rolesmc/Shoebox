@@ -1,24 +1,45 @@
 import React, { useState } from "react";
 import { X, Shield, Key } from "lucide-react";
 
-export default function MockLoginModal({ isOpen, accountType, onSelect, onClose }) {
+export default function MockLoginModal({
+  isOpen,
+  accountType,
+  onSelect,
+  onClose,
+}) {
+  const [customEmail, setCustomEmail] = useState("");
+  const [error, setError] = useState("");
+
   if (!isOpen) return null;
 
   const isSource = accountType === "source";
   const accentColor = isSource ? "var(--accent-neon)" : "var(--accent-purple)";
-  
+
   const mockAccounts = isSource
     ? [
-        { email: "student@school.edu", name: "Alex Student", desc: "Institutional Source Workspace" },
-        { email: "graduating@university.edu", name: "Alex Graduate", desc: "Secondary School Account" }
+        {
+          email: "student@school.edu",
+          name: "Alex Student",
+          desc: "Institutional Source Workspace",
+        },
+        {
+          email: "graduating@university.edu",
+          name: "Alex Graduate",
+          desc: "Secondary School Account",
+        },
       ]
     : [
-        { email: "alex.me@gmail.com", name: "Alex Chen (Personal)", desc: "Personal Google Account" },
-        { email: "backup.alex@gmail.com", name: "Alex Chen (Backup)", desc: "Alternative Destination Account" }
+        {
+          email: "alex.me@gmail.com",
+          name: "Alex Chen (Personal)",
+          desc: "Personal Google Account",
+        },
+        {
+          email: "backup.alex@gmail.com",
+          name: "Alex Chen (Backup)",
+          desc: "Alternative Destination Account",
+        },
       ];
-
-  const [customEmail, setCustomEmail] = useState("");
-  const [error, setError] = useState("");
 
   const handleSelect = (email) => {
     const fakeToken = `mock_${accountType}_token_${Math.random().toString(36).substring(2, 15)}`;
@@ -84,8 +105,12 @@ export default function MockLoginModal({ isOpen, accountType, onSelect, onClose 
             justifyContent: "center",
             transition: "all 0.2s",
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.color = "var(--text-primary)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.color = "var(--text-secondary)")
+          }
         >
           <X size={20} />
         </button>
@@ -135,7 +160,14 @@ export default function MockLoginModal({ isOpen, accountType, onSelect, onClose 
         </div>
 
         {/* Options List */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "24px" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            marginBottom: "24px",
+          }}
+        >
           {mockAccounts.map((acc, index) => (
             <button
               key={index}
@@ -180,23 +212,74 @@ export default function MockLoginModal({ isOpen, accountType, onSelect, onClose 
                 {acc.name[0]}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ color: "var(--text-primary)", fontSize: "14px", fontWeight: 600 }}>{acc.name}</div>
-                <div style={{ color: "var(--text-secondary)", fontSize: "11px", marginTop: "2px" }}>{acc.email}</div>
+                <div
+                  style={{
+                    color: "var(--text-primary)",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                  }}
+                >
+                  {acc.name}
+                </div>
+                <div
+                  style={{
+                    color: "var(--text-secondary)",
+                    fontSize: "11px",
+                    marginTop: "2px",
+                  }}
+                >
+                  {acc.email}
+                </div>
               </div>
-              <div style={{ color: "var(--text-secondary)", fontSize: "10px", opacity: 0.6 }}>{acc.desc}</div>
+              <div
+                style={{
+                  color: "var(--text-secondary)",
+                  fontSize: "10px",
+                  opacity: 0.6,
+                }}
+              >
+                {acc.desc}
+              </div>
             </button>
           ))}
         </div>
 
         {/* Divider */}
-        <div style={{ display: "flex", alignItems: "center", margin: "24px 0" }}>
-          <div style={{ flex: 1, height: "1px", background: "rgba(255, 255, 255, 0.06)" }}></div>
-          <span style={{ padding: "0 12px", color: "var(--text-secondary)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Or custom email</span>
-          <div style={{ flex: 1, height: "1px", background: "rgba(255, 255, 255, 0.06)" }}></div>
+        <div
+          style={{ display: "flex", alignItems: "center", margin: "24px 0" }}
+        >
+          <div
+            style={{
+              flex: 1,
+              height: "1px",
+              background: "rgba(255, 255, 255, 0.06)",
+            }}
+          ></div>
+          <span
+            style={{
+              padding: "0 12px",
+              color: "var(--text-secondary)",
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            Or custom email
+          </span>
+          <div
+            style={{
+              flex: 1,
+              height: "1px",
+              background: "rgba(255, 255, 255, 0.06)",
+            }}
+          ></div>
         </div>
 
         {/* Custom Input Form */}
-        <form onSubmit={handleCustomSubmit} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <form
+          onSubmit={handleCustomSubmit}
+          style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+        >
           <div style={{ display: "flex", gap: "8px" }}>
             <input
               type="text"
@@ -215,7 +298,9 @@ export default function MockLoginModal({ isOpen, accountType, onSelect, onClose 
                 transition: "all 0.2s",
               }}
               onFocus={(e) => (e.currentTarget.style.borderColor = accentColor)}
-              onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.1)")}
+              onBlur={(e) =>
+                (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.1)")
+              }
             />
             <button
               type="submit"
@@ -232,7 +317,9 @@ export default function MockLoginModal({ isOpen, accountType, onSelect, onClose 
                 gap: "6px",
                 transition: "all 0.2s",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.filter = "brightness(1.1)")}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.filter = "brightness(1.1)")
+              }
               onMouseLeave={(e) => (e.currentTarget.style.filter = "none")}
             >
               <Key size={14} />
@@ -240,7 +327,9 @@ export default function MockLoginModal({ isOpen, accountType, onSelect, onClose 
             </button>
           </div>
           {error && (
-            <div style={{ color: "#ef4444", fontSize: "12px", marginTop: "2px" }}>
+            <div
+              style={{ color: "#ef4444", fontSize: "12px", marginTop: "2px" }}
+            >
               {error}
             </div>
           )}
@@ -259,15 +348,25 @@ export default function MockLoginModal({ isOpen, accountType, onSelect, onClose 
             alignItems: "flex-start",
           }}
         >
-          <div style={{ color: "var(--text-secondary)", fontSize: "11px", lineHeight: "1.4" }}>
-            <strong style={{ color: "var(--text-primary)" }}>Scopes requested:</strong>{" "}
+          <div
+            style={{
+              color: "var(--text-secondary)",
+              fontSize: "11px",
+              lineHeight: "1.4",
+            }}
+          >
+            <strong style={{ color: "var(--text-primary)" }}>
+              Scopes requested:
+            </strong>{" "}
             {isSource ? (
               <span>
-                <code>drive.readonly</code>, <code>userinfo.email</code>. Permits browsing files to select what is copied.
+                <code>drive.readonly</code>, <code>userinfo.email</code>.
+                Permits browsing files to select what is copied.
               </span>
             ) : (
               <span>
-                <code>drive.file</code>, <code>userinfo.email</code>. Permits creating new files in your personal account.
+                <code>drive.file</code>, <code>userinfo.email</code>. Permits
+                creating new files in your personal account.
               </span>
             )}
           </div>

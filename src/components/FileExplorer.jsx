@@ -90,6 +90,9 @@ export default function FileExplorer({
   files = [],
   selectedIds = new Set(),
   onToggle = () => {},
+  scanState = "idle",
+  onScan = null,
+  hasSourceToken = false,
 }) {
   // Pass-through identity-stable data object to the FixedSizeList Row renderer.
   const itemData = useMemo(
@@ -135,11 +138,46 @@ export default function FileExplorer({
           marginBottom: "8px",
         }}
       >
-        <h3
-          style={{ margin: 0, color: "var(--text-primary)", fontSize: "16px" }}
-        >
-          Files
-        </h3>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <h3
+            style={{
+              margin: 0,
+              color: "var(--text-primary)",
+              fontSize: "16px",
+            }}
+          >
+            Files
+          </h3>
+          {hasSourceToken && onScan && (
+            <button
+              onClick={() => onScan("scanning")}
+              disabled={scanState === "scanning"}
+              style={{
+                padding: "4px 10px",
+                background:
+                  scanState === "scanning"
+                    ? "rgba(255,255,255,0.08)"
+                    : "rgba(139, 92, 246, 0.15)",
+                color:
+                  scanState === "scanning"
+                    ? "var(--text-secondary)"
+                    : "var(--accent-purple)",
+                border: `1px solid ${scanState === "scanning" ? "rgba(255,255,255,0.1)" : "var(--accent-purple)"}`,
+                borderRadius: "8px",
+                fontSize: "11px",
+                fontWeight: 600,
+                cursor: scanState === "scanning" ? "not-allowed" : "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              {scanState === "scanning"
+                ? "Scanning..."
+                : scanState === "done"
+                  ? "Rescan"
+                  : "Scan"}
+            </button>
+          )}
+        </div>
         <span
           style={{
             color: "var(--text-secondary)",

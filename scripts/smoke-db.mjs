@@ -23,9 +23,15 @@ const PKG_ROOT = resolve(__dirname, "..");
 
 const TEST_TIMEOUT_MS = 10_000;
 
-function pass(msg) { console.log(`PASS: ${msg}`); }
-function fail(msg) { console.error(`FAIL: ${msg}`); }
-function info(msg) { console.log(`INFO: ${msg}`); }
+function pass(msg) {
+  console.log(`PASS: ${msg}`);
+}
+function fail(msg) {
+  console.error(`FAIL: ${msg}`);
+}
+function info(msg) {
+  console.log(`INFO: ${msg}`);
+}
 
 async function pickFreePort() {
   return new Promise((res, rej) => {
@@ -72,7 +78,9 @@ async function main() {
 
   const chromePath = locateChrome();
   if (!chromePath) {
-    fail("No system Chrome or Chromium binary located. Headless browser testing aborted.");
+    fail(
+      "No system Chrome or Chromium binary located. Headless browser testing aborted.",
+    );
     process.exit(1);
   }
   pass(`Chrome located successfully: ${chromePath}`);
@@ -100,7 +108,7 @@ async function main() {
     ".html": "text/html",
     ".js": "application/javascript",
     ".css": "text/css",
-    ".svg": "image/svg+xml"
+    ".svg": "image/svg+xml",
   };
 
   let chromeProcess = null;
@@ -114,26 +122,33 @@ async function main() {
   const server = http.createServer((req, res) => {
     if (req.method === "POST" && req.url === "/api/test-results") {
       let body = "";
-      req.on("data", chunk => body += chunk);
+      req.on("data", (chunk) => (body += chunk));
       req.on("end", () => {
-        res.writeHead(200, { 
+        res.writeHead(200, {
           "Content-Type": "text/plain",
-          "Access-Control-Allow-Origin": "*"
+          "Access-Control-Allow-Origin": "*",
         });
         res.end("ok");
         try {
           const payload = JSON.parse(body);
           testResolve(payload);
         } catch (e) {
-          testResolve({ passed: false, results: `Invalid JSON payload from browser: ${e.message}` });
+          testResolve({
+            passed: false,
+            results: `Invalid JSON payload from browser: ${e.message}`,
+          });
         }
       });
       return;
     }
 
     const safeUrl = req.url.split("?")[0];
-    const filePath = path.join(PKG_ROOT, "dist", safeUrl === "/" ? "index.html" : safeUrl);
-    
+    const filePath = path.join(
+      PKG_ROOT,
+      "dist",
+      safeUrl === "/" ? "index.html" : safeUrl,
+    );
+
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       const ext = path.extname(filePath);
       res.writeHead(200, { "Content-Type": mimeTypes[ext] || "text/plain" });
@@ -146,11 +161,11 @@ async function main() {
 
   server.listen(port, "127.0.0.1", () => {
     info(`Internal static server listening on http://127.0.0.1:${port}`);
-    
+
     // Spawn Chrome Headlessly (Real Time, no --dump-dom, no virtual-time budget)
     const testUrl = `http://127.0.0.1:${port}/db-test.html`;
     info(`Spawning Headless Chrome targeting: ${testUrl}`);
-    
+
     const args = [
       "--headless=new",
       "--disable-gpu",
@@ -159,23 +174,25 @@ async function main() {
       testUrl,
     ];
     chromeProcess = spawn(chromePath, args);
-    
+
     // Set a global timeout safeguard
     testTimeout = setTimeout(() => {
       testResolve({
         passed: false,
-        results: `FAIL: Database test suite timed out after ${TEST_TIMEOUT_MS / 1000}s without posting results.`
+        results: `FAIL: Database test suite timed out after ${TEST_TIMEOUT_MS / 1000}s without posting results.`,
       });
     }, TEST_TIMEOUT_MS);
   });
 
   // Await the callback from the browser
   const data = await testPromise;
-  
+
   // Cleanup
   clearTimeout(testTimeout);
   if (chromeProcess) {
-    try { chromeProcess.kill("SIGKILL"); } catch {}
+    try {
+      chromeProcess.kill("SIGKILL");
+    } catch {}
   }
   server.close();
 

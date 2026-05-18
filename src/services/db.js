@@ -1,13 +1,13 @@
-import { openDB } from 'idb';
+import { openDB } from "idb";
 
-const DATABASE_NAME = 'univault';
+const DATABASE_NAME = "univault";
 const DATABASE_VERSION = 1;
 
 const STORES = {
-  FILES: 'files',
-  SELECTION: 'selection',
-  QUEUE: 'queue',
-  FOLDER_MAP: 'folderMap'
+  FILES: "files",
+  SELECTION: "selection",
+  QUEUE: "queue",
+  FOLDER_MAP: "folderMap",
 };
 
 let dbPromise = null;
@@ -21,25 +21,27 @@ export async function initDB() {
 
   dbPromise = openDB(DATABASE_NAME, DATABASE_VERSION, {
     upgrade(db, oldVersion, newVersion, transaction) {
-      console.log(`[IndexedDB] Upgrading database from v${oldVersion} to v${newVersion}`);
-      
+      console.log(
+        `[IndexedDB] Upgrading database from v${oldVersion} to v${newVersion}`,
+      );
+
       // Build stores dynamically if they do not exist
       if (!db.objectStoreNames.contains(STORES.FILES)) {
-        db.createObjectStore(STORES.FILES, { keyPath: 'id' });
+        db.createObjectStore(STORES.FILES, { keyPath: "id" });
       }
-      
+
       if (!db.objectStoreNames.contains(STORES.SELECTION)) {
-        db.createObjectStore(STORES.SELECTION, { keyPath: 'id' });
+        db.createObjectStore(STORES.SELECTION, { keyPath: "id" });
       }
-      
+
       if (!db.objectStoreNames.contains(STORES.QUEUE)) {
-        db.createObjectStore(STORES.QUEUE, { keyPath: 'id' });
+        db.createObjectStore(STORES.QUEUE, { keyPath: "id" });
       }
-      
+
       if (!db.objectStoreNames.contains(STORES.FOLDER_MAP)) {
-        db.createObjectStore(STORES.FOLDER_MAP, { keyPath: 'id' });
+        db.createObjectStore(STORES.FOLDER_MAP, { keyPath: "id" });
       }
-    }
+    },
   });
 
   return dbPromise;
@@ -52,14 +54,22 @@ const selectionListeners = new Set();
 const queueListeners = new Set();
 
 function notifySelectionChange(selectionSet) {
-  selectionListeners.forEach(cb => {
-    try { cb(selectionSet); } catch (e) { console.error('[PubSub] Selection listener failure:', e); }
+  selectionListeners.forEach((cb) => {
+    try {
+      cb(selectionSet);
+    } catch (e) {
+      console.error("[PubSub] Selection listener failure:", e);
+    }
   });
 }
 
 function notifyQueueChange(queueArray) {
-  queueListeners.forEach(cb => {
-    try { cb(queueArray); } catch (e) { console.error('[PubSub] Queue listener failure:', e); }
+  queueListeners.forEach((cb) => {
+    try {
+      cb(queueArray);
+    } catch (e) {
+      console.error("[PubSub] Queue listener failure:", e);
+    }
   });
 }
 
@@ -69,7 +79,7 @@ function notifyQueueChange(queueArray) {
 export const FileStore = {
   async putFiles(filesArray) {
     const db = await initDB();
-    const tx = db.transaction(STORES.FILES, 'readwrite');
+    const tx = db.transaction(STORES.FILES, "readwrite");
     const store = tx.objectStore(STORES.FILES);
     for (const file of filesArray) {
       await store.put(file);
@@ -84,10 +94,10 @@ export const FileStore = {
 
   async clear() {
     const db = await initDB();
-    const tx = db.transaction(STORES.FILES, 'readwrite');
+    const tx = db.transaction(STORES.FILES, "readwrite");
     await tx.objectStore(STORES.FILES).clear();
     await tx.done;
-  }
+  },
 };
 
 // ----------------------------------------------------
@@ -96,17 +106,17 @@ export const FileStore = {
 export const SelectionStore = {
   async addSelection(id) {
     const db = await initDB();
-    const tx = db.transaction(STORES.SELECTION, 'readwrite');
+    const tx = db.transaction(STORES.SELECTION, "readwrite");
     await tx.objectStore(STORES.SELECTION).put({ id });
     await tx.done;
-    
+
     const selection = await this.getSelection();
     notifySelectionChange(selection);
   },
 
   async removeSelection(id) {
     const db = await initDB();
-    const tx = db.transaction(STORES.SELECTION, 'readwrite');
+    const tx = db.transaction(STORES.SELECTION, "readwrite");
     await tx.objectStore(STORES.SELECTION).delete(id);
     await tx.done;
 
@@ -116,7 +126,7 @@ export const SelectionStore = {
 
   async setSelection(idsSet) {
     const db = await initDB();
-    const tx = db.transaction(STORES.SELECTION, 'readwrite');
+    const tx = db.transaction(STORES.SELECTION, "readwrite");
     const store = tx.objectStore(STORES.SELECTION);
     await store.clear();
     for (const id of idsSet) {
@@ -131,13 +141,13 @@ export const SelectionStore = {
   async getSelection() {
     const db = await initDB();
     const all = await db.getAll(STORES.SELECTION);
-    return new Set(all.map(item => item.id));
+    return new Set(all.map((item) => item.id));
   },
 
   subscribe(callback) {
     selectionListeners.add(callback);
     // Initial emission support for reactive sync on mount
-    this.getSelection().then(selection => {
+    this.getSelection().then((selection) => {
       if (selectionListeners.has(callback)) {
         callback(selection);
       }
@@ -149,11 +159,11 @@ export const SelectionStore = {
 
   async clear() {
     const db = await initDB();
-    const tx = db.transaction(STORES.SELECTION, 'readwrite');
+    const tx = db.transaction(STORES.SELECTION, "readwrite");
     await tx.objectStore(STORES.SELECTION).clear();
     await tx.done;
     notifySelectionChange(new Set());
-  }
+  },
 };
 
 // ----------------------------------------------------
@@ -168,25 +178,25 @@ export const QueueStore = {
    */
   async updateTask(id, updates) {
     const db = await initDB();
-    const tx = db.transaction(STORES.QUEUE, 'readwrite');
+    const tx = db.transaction(STORES.QUEUE, "readwrite");
     const store = tx.objectStore(STORES.QUEUE);
-    
+
     const existing = await store.get(id);
     const updatedTask = {
       id,
-      status: 'pending',
+      status: "pending",
       bytesCopied: 0,
       errorMsg: null,
       destFileId: null,
       ...existing,
-      ...updates
+      ...updates,
     };
-    
+
     await store.put(updatedTask);
-    
+
     // MANDATORY PERS-03: Explicitly await native hardware commit
     await tx.done;
-    
+
     const queue = await this.getTasks();
     notifyQueueChange(queue);
   },
@@ -198,7 +208,7 @@ export const QueueStore = {
 
   subscribe(callback) {
     queueListeners.add(callback);
-    this.getTasks().then(tasks => {
+    this.getTasks().then((tasks) => {
       if (queueListeners.has(callback)) {
         callback(tasks);
       }
@@ -210,11 +220,11 @@ export const QueueStore = {
 
   async clear() {
     const db = await initDB();
-    const tx = db.transaction(STORES.QUEUE, 'readwrite');
+    const tx = db.transaction(STORES.QUEUE, "readwrite");
     await tx.objectStore(STORES.QUEUE).clear();
     await tx.done;
     notifyQueueChange([]);
-  }
+  },
 };
 
 // ----------------------------------------------------
@@ -223,7 +233,7 @@ export const QueueStore = {
 export const FolderMapStore = {
   async putFolderMapping(id, destFolderId, name) {
     const db = await initDB();
-    const tx = db.transaction(STORES.FOLDER_MAP, 'readwrite');
+    const tx = db.transaction(STORES.FOLDER_MAP, "readwrite");
     await tx.objectStore(STORES.FOLDER_MAP).put({ id, destFolderId, name });
     await tx.done;
   },
@@ -235,10 +245,10 @@ export const FolderMapStore = {
 
   async clear() {
     const db = await initDB();
-    const tx = db.transaction(STORES.FOLDER_MAP, 'readwrite');
+    const tx = db.transaction(STORES.FOLDER_MAP, "readwrite");
     await tx.objectStore(STORES.FOLDER_MAP).clear();
     await tx.done;
-  }
+  },
 };
 
 // ----------------------------------------------------
@@ -246,7 +256,7 @@ export const FolderMapStore = {
 // ----------------------------------------------------
 export async function clearAllData() {
   const db = await initDB();
-  const tx = db.transaction(Object.values(STORES), 'readwrite');
+  const tx = db.transaction(Object.values(STORES), "readwrite");
   await tx.objectStore(STORES.FILES).clear();
   await tx.objectStore(STORES.SELECTION).clear();
   await tx.objectStore(STORES.QUEUE).clear();
