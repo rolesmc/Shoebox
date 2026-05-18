@@ -1,8 +1,5 @@
-// src/App.jsx — replaced by <BentoDashboard /> in Plan 04
+import BentoDashboard from './components/BentoDashboard.jsx';
+
 export default function App() {
-  return (
-    <div id="app-root">
-      <p>UniVault scaffold ready. Components arrive in Plan 04.</p>
-    </div>
-  );
+  return <BentoDashboard />;
 }

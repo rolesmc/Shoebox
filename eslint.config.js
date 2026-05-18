@@ -10,12 +10,18 @@ export default defineConfig([
     files: ['**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,
-      reactHooks.configs.flat.recommended,
+      // eslint-plugin-react-hooks v5 uses configs['recommended-latest'] for flat config
+      reactHooks.configs['recommended-latest'],
       reactRefresh.configs.vite,
     ],
     languageOptions: {
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+    rules: {
+      // PascalCase identifiers used as JSX element names are not detected as "used"
+      // by eslint's no-unused-vars without eslint-plugin-react. Ignore them via pattern.
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z]', args: 'none' }],
     },
   },
 ])
