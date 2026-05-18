@@ -46,7 +46,7 @@ CHROME_PATH=/path/to/chrome npm run smoke:prod
 
 ## Manual UX checks (Phase 0 acceptance)
 
-After `npm run dev`, open `http://localhost:5173` and verify:
+After `npm run dev`, open `http://localhost:5188` and verify:
 
 1. **Glassmorphism visual fidelity**: dark background `#060608`,
    glass cards visibly blurred with subtle borders, Inter font on
