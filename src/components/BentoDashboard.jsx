@@ -2,7 +2,7 @@
 // Top-level Bento composer. Owns all UI state per D-11 (no Zustand).
 // DevPanel mounts only when import.meta.env.DEV; Vite tree-shakes the import in prod.
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import "./Bento.css";
 
 // Sibling components
@@ -220,7 +220,11 @@ export default function BentoDashboard() {
   // ----------------------------------------------------
   // 401 Interception & Exception Handling (AUTH-06)
   // ----------------------------------------------------
-  const handleApiError = async (err) => {
+  // WR-02: wrapped in useCallback so the closure identity is stable across
+  // renders. This lets effects safely include handleApiError in their dep
+  // arrays without spuriously re-firing. All setters captured here are
+  // useState setters (stable identities), so deps stay empty.
+  const handleApiError = useCallback(async (err) => {
     if (err.status === 401 || err.errors?.[0]?.reason === "authError") {
       console.error(
         "[BentoDashboard] Caught 401 Unauthorized API error! Freezing transfer queue & flushes...",
@@ -247,7 +251,7 @@ export default function BentoDashboard() {
     } else {
       console.error("[BentoDashboard] API Call Exception:", err);
     }
-  };
+  }, []);
 
   // ----------------------------------------------------
   // Streaming File Listing / Scanning Task progress (SCAN-01 to SCAN-04)
@@ -303,7 +307,7 @@ export default function BentoDashboard() {
     return () => {
       active = false;
     };
-  }, [scanState, sourceToken]);
+  }, [scanState, sourceToken, handleApiError]);
 
   // ----------------------------------------------------
   // Phase 6: Folder Mirror Orchestration (MIRROR-01..04)
@@ -360,7 +364,7 @@ export default function BentoDashboard() {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queueState]); // CR-02: selectedIds + destToken intentionally excluded — snapshotted above
+  }, [queueState, handleApiError]); // CR-02: selectedIds + destToken intentionally excluded — snapshotted above
 
   // ----------------------------------------------------
   // Dynamic Background Transfer Loop (GAUGE-02, FILES-04)
