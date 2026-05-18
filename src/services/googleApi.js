@@ -62,7 +62,10 @@ export async function listFiles({ pageToken, q, token } = {}) {
       errData.error?.message || `Drive API error: ${response.status}`,
     );
     err.status = response.status;
-    err.reason = errData.error?.errors?.[0]?.reason || "authError";
+    // CR-01: only default to "authError" on actual 401 — otherwise leave undefined so
+    // transient 5xx/network errors are not misclassified as auth failures by retry/auth handlers.
+    err.reason = errData.error?.errors?.[0]?.reason
+      || (response.status === 401 ? "authError" : undefined);
     throw err;
   }
 
@@ -146,7 +149,10 @@ export async function copyFile({
       errData.error?.message || `Drive API error: ${response.status}`,
     );
     err.status = response.status;
-    err.reason = errData.error?.errors?.[0]?.reason || "authError";
+    // CR-01: only default to "authError" on actual 401 — otherwise leave undefined so
+    // transient 5xx/network errors are not misclassified as auth failures by retry/auth handlers.
+    err.reason = errData.error?.errors?.[0]?.reason
+      || (response.status === 401 ? "authError" : undefined);
     throw err;
   }
 
@@ -192,7 +198,10 @@ export async function createFolder({ name, parents, token } = {}) {
       errData.error?.message || `Drive API error: ${response.status}`,
     );
     err.status = response.status;
-    err.reason = errData.error?.errors?.[0]?.reason || "authError";
+    // CR-01: only default to "authError" on actual 401 — otherwise leave undefined so
+    // transient 5xx/network errors are not misclassified as auth failures by retry/auth handlers.
+    err.reason = errData.error?.errors?.[0]?.reason
+      || (response.status === 401 ? "authError" : undefined);
     throw err;
   }
 
@@ -229,7 +238,10 @@ export async function getAbout({ token } = {}) {
       errData.error?.message || `Drive API error: ${response.status}`,
     );
     err.status = response.status;
-    err.reason = errData.error?.errors?.[0]?.reason || "authError";
+    // CR-01: only default to "authError" on actual 401 — otherwise leave undefined so
+    // transient 5xx/network errors are not misclassified as auth failures by retry/auth handlers.
+    err.reason = errData.error?.errors?.[0]?.reason
+      || (response.status === 401 ? "authError" : undefined);
     throw err;
   }
 
