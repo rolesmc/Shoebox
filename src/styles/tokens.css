@@ -1,0 +1,15 @@
+/* Design tokens — VERBATIM from HANDOFF.md §4 (Premium Design System). */
+/* Do NOT add new variables here in Phase 0; new tokens require a planning decision. */
+/* Source of truth: /Users/chrischen/Downloads/UniVault/HANDOFF.md §4 */
+
+:root {
+  --bg-main: #060608;
+  --bg-card: rgba(18, 18, 24, 0.65);
+  --line-border: rgba(255, 255, 255, 0.08);
+  --text-primary: #FFFFFF;
+  --text-secondary: #9CA3AF;
+  --accent-neon: #10B981;       /* Neon Emerald for Growth */
+  --accent-purple: #8B5CF6;     /* High-Value Highlight */
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
