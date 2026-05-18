@@ -24,7 +24,7 @@ import { STATE_OPTIONS } from './stateOptions.js';
 
 // Mocks (DEV-only by guard inside the mock modules themselves).
 import { listFiles } from '../mocks/googleApi.mock.js';
-import { getAllFiles, getAllFolders } from '../mocks/mockData.js';
+import { getAllFiles, getAllFolders, getStressFiles } from '../mocks/mockData.js';
 
 // Map composite auth state → per-card state.
 function authCardStates(auth) {
@@ -80,6 +80,17 @@ export default function BentoDashboard() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // When DevPanel toggles a stress-test dataset size (>500), swap files to the stress dataset.
+  useEffect(() => {
+    if (datasetSize <= 500) {
+      setFiles(getAllFiles());
+    } else {
+      setFiles(getStressFiles(datasetSize));
+    }
+    // Clear selection when swapping datasets — IDs do not overlap reliably.
+    setSelectedIds(new Set());
+  }, [datasetSize]);
 
   const cards = useMemo(() => authCardStates(authState), [authState]);
   const totalSize = useMemo(() => files.reduce((s, f) => s + Number(f.size || 0), 0), [files]);
