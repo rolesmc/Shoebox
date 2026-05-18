@@ -3,8 +3,8 @@
 // When Phase 4 lands, consumers swap import path with no other changes.
 // DEV-only by convention — enforced by callers using DEV-gated dynamic imports.
 
-import { getAllFiles, getAllFolders } from './mockData.js';
-import { throwIfArmed } from './failureInjection.js';
+import { getAllFiles, getAllFolders } from "./mockData.js";
+import { throwIfArmed } from "./failureInjection.js";
 
 const PAGE_SIZE = 1000;
 
@@ -22,9 +22,9 @@ function latency() {
 function paginate(items, pageToken) {
   const half = Math.ceil(items.length / 2);
   if (!pageToken) {
-    return { files: items.slice(0, half), nextPageToken: 'page-2' };
+    return { files: items.slice(0, half), nextPageToken: "page-2" };
   }
-  if (pageToken === 'page-2') {
+  if (pageToken === "page-2") {
     return { files: items.slice(half), nextPageToken: null };
   }
   // Defensive: unknown token → treat as final.
@@ -51,7 +51,13 @@ export async function listFolders() {
 }
 
 /** D-08: copyFile({ fileId, parents, name, modifiedTime, starred }) — returns the new file shape. */
-export async function copyFile({ fileId, parents, name, modifiedTime, starred }) {
+export async function copyFile({
+  fileId,
+  parents,
+  name,
+  modifiedTime,
+  starred,
+}) {
   await latency();
   throwIfArmed();
   // Mock returns a plausible new ID; preserves the requested name/modifiedTime/starred.
@@ -72,7 +78,7 @@ export async function createFolder({ name, parents }) {
     id: `fld_new_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
     name,
     parents,
-    mimeType: 'application/vnd.google-apps.folder',
+    mimeType: "application/vnd.google-apps.folder",
   };
 }
 
@@ -83,9 +89,9 @@ export async function getAbout() {
   // Numbers chosen so StorageGauge can demo every state via DevPanel toggling the dataset.
   return {
     storageQuota: {
-      limit:        String(100 * 1024 * 1024 * 1024),  // 100 GB
-      usage:        String(42  * 1024 * 1024 * 1024),  // 42 GB used
-      usageInDrive: String(38  * 1024 * 1024 * 1024),  // 38 GB in Drive
+      limit: String(100 * 1024 * 1024 * 1024), // 100 GB
+      usage: String(42 * 1024 * 1024 * 1024), // 42 GB used
+      usageInDrive: String(38 * 1024 * 1024 * 1024), // 38 GB in Drive
     },
   };
 }
