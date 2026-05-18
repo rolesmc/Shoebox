@@ -12,7 +12,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "smoke:prod": "node scripts/smoke-prod.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",
