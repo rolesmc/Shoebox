@@ -308,10 +308,16 @@ export default function BentoDashboard() {
   // ----------------------------------------------------
   // Phase 6: Folder Mirror Orchestration (MIRROR-01..04)
   // ----------------------------------------------------
+  // CR-02: depend ONLY on queueState. selectedIds + destToken are snapshotted at
+  // start so a mid-mirror checkbox toggle cannot cancel-and-restart the IIFE,
+  // which previously raced two create-streams and could double-create folders.
   useEffect(() => {
     if (queueState !== "mirroring") return;
 
     let active = true;
+    // Snapshot inputs at mirror start — subsequent toggles MUST NOT affect this run.
+    const snapshotSelectedIds = new Set(selectedIds);
+    const snapshotDestToken = destToken;
     (async () => {
       try {
         setMirrorError(null);
@@ -324,9 +330,9 @@ export default function BentoDashboard() {
         const { mirrorFolders } = await import("../utils/folderMirror.js");
 
         const result = await mirrorFolders({
-          selectedIds,
+          selectedIds: snapshotSelectedIds,
           filesById,
-          destToken,
+          destToken: snapshotDestToken,
           onProgress: ({ created, total, name }) => {
             if (!active) return;
             setMirrorProgress({ created, total, name });
@@ -353,7 +359,8 @@ export default function BentoDashboard() {
     return () => {
       active = false;
     };
-  }, [queueState, selectedIds, destToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueState]); // CR-02: selectedIds + destToken intentionally excluded — snapshotted above
 
   // ----------------------------------------------------
   // Dynamic Background Transfer Loop (GAUGE-02, FILES-04)
