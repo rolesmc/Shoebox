@@ -693,6 +693,12 @@ export default function BentoDashboard() {
   };
 
   const handleReset = async () => {
+    // WR-05: deliberately clears ONLY the per-file queue. FolderMapStore is
+    // intentionally preserved so a subsequent mirror reuses the existing
+    // timestamped root + folder mappings (resume semantic, RESEARCH §Pitfall 4).
+    // A user who wants a fully fresh migration (new root folder) must sign out;
+    // clearAllData() in handleSignOut wipes the folderMap. The button is labeled
+    // "Clear queue" (not "Reset") in TransferPortal to disambiguate.
     setQueueState("idle");
     await QueueStore.clear();
   };
