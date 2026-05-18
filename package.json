@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "sideEffects": ["./src/mocks/*.js"],
+  "sideEffects": [
+    "./src/mocks/*.js"
+  ],
   "engines": {
     "node": ">=20.19.0 <21 || >=22.12.0"
   },
@@ -17,6 +19,7 @@
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
+    "idb": "^8.0.3",
     "lucide-react": "^0.460.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
