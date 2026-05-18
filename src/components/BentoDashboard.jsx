@@ -56,6 +56,10 @@ export default function BentoDashboard() {
 
   const [scanState, setScanState] = useState("idle");
   const [queueState, setQueueState] = useState("idle");
+  // Phase 6 mirror state (MIRROR-01..04)
+  const [mirrorProgress, setMirrorProgress] = useState({ created: 0, total: 0, name: "" });
+  const [rootDestId, setRootDestId] = useState(null);  // consumed by Phase 7 copy queue
+  const [mirrorError, setMirrorError] = useState(null);
   const [gaugeState, setGaugeState] = useState("partial");
   const [resumeState, setResumeState] = useState("no-cursor");
 
@@ -302,21 +306,64 @@ export default function BentoDashboard() {
   }, [scanState, sourceToken]);
 
   // ----------------------------------------------------
+  // Phase 6: Folder Mirror Orchestration (MIRROR-01..04)
+  // ----------------------------------------------------
+  useEffect(() => {
+    if (queueState !== "mirroring") return;
+
+    let active = true;
+    (async () => {
+      try {
+        setMirrorError(null);
+        setMirrorProgress({ created: 0, total: 0, name: "" });
+
+        const allFiles = await FileStore.getAllFiles();
+        if (!active) return;
+        const filesById = new Map(allFiles.map((f) => [f.id, f]));
+
+        const { mirrorFolders } = await import("../utils/folderMirror.js");
+
+        const result = await mirrorFolders({
+          selectedIds,
+          filesById,
+          destToken,
+          onProgress: ({ created, total, name }) => {
+            if (!active) return;
+            setMirrorProgress({ created, total, name });
+          },
+          onAuthError: handleApiError,
+        });
+
+        if (!active) return;
+        setRootDestId(result.rootDestId);
+        setQueueState("copying");
+      } catch (err) {
+        if (!active) return;
+        console.error("[BentoDashboard] Mirror failure caught:", err);
+        if (err?.status === 401 || err?.errors?.[0]?.reason === "authError") {
+          await handleApiError(err);
+          // handleApiError already transitions queueState — do not overwrite
+        } else {
+          setMirrorError(err?.message || String(err));
+          setQueueState("mirror-failed");
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [queueState, selectedIds, destToken]);
+
+  // ----------------------------------------------------
   // Dynamic Background Transfer Loop (GAUGE-02, FILES-04)
   // ----------------------------------------------------
   useEffect(() => {
-    if (queueState !== "mirroring" && queueState !== "copying") return;
+    if (queueState !== "copying") return;
 
     let active = true;
 
     const runQueue = async () => {
-      if (queueState === "mirroring") {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        if (!active) return;
-        setQueueState("copying");
-        return;
-      }
-
       // queueState is "copying"
       const selectedArr = Array.from(selectedIds);
       if (selectedArr.length === 0) {
@@ -916,6 +963,57 @@ export default function BentoDashboard() {
               }}
             />
           </div>
+        </div>
+      )}
+
+      {/* Phase 6: Mirror Progress Indicator (MIRROR-01..04) */}
+      {queueState === "mirroring" && mirrorProgress.total > 0 && (
+        <div
+          className="glass-card"
+          style={{ padding: "10px 14px", marginTop: "8px", marginBottom: "16px", fontSize: "13px", color: "var(--text-secondary)" }}
+          role="status"
+          aria-live="polite"
+        >
+          Mirroring folder {mirrorProgress.created} of {mirrorProgress.total}
+          {mirrorProgress.name ? `: ${mirrorProgress.name}` : ""}
+        </div>
+      )}
+
+      {/* Phase 6: Mirror Failure UX (with Retry) */}
+      {queueState === "mirror-failed" && (
+        <div
+          className="glass-card"
+          style={{
+            padding: "10px 14px",
+            marginTop: "8px",
+            marginBottom: "16px",
+            fontSize: "13px",
+            color: "#f87171",
+            borderColor: "rgba(248, 113, 113, 0.35)",
+          }}
+          role="alert"
+        >
+          <div style={{ marginBottom: "6px" }}>
+            Folder mirror failed: {mirrorError || "unknown error"}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setMirrorError(null);
+              setQueueState("mirroring");
+            }}
+            style={{
+              background: "rgba(139, 92, 246, 0.18)",
+              border: "1px solid rgba(139, 92, 246, 0.45)",
+              color: "var(--accent-purple)",
+              padding: "4px 10px",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "12px",
+            }}
+          >
+            Retry mirror
+          </button>
         </div>
       )}
 
