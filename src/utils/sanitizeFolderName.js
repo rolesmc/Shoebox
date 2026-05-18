@@ -23,7 +23,14 @@
 export function sanitizeFolderName(name) {
   if (!name) return "Untitled";
   const cleaned = String(name)
-    .replace(/[‪-‮⁦-⁩​-‏­]/g, "")
+    // WR-04: explicit \u escapes — auditable in any editor/diff tool, robust
+    // against Unicode normalization in copy-paste, and won't trip security
+    // scanners on invisible source codepoints.
+    //   U+202A..U+202E  LRE, RLE, PDF, LRO, RLO
+    //   U+2066..U+2069  LRI, RLI, FSI, PDI
+    //   U+200B..U+200F  ZWSP, ZWNJ, ZWJ, LRM, RLM
+    //   U+00AD          soft hyphen
+    .replace(/[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u00AD]/g, "")
     .replace(/[\x00-\x1F\x7F]/g, "")
     .trim()
     .slice(0, 255);
