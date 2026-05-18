@@ -895,6 +895,7 @@ export default function BentoDashboard() {
           onDatasetSize={setDatasetSize}
           onOpenPreflight={() => setPreflightOpen(true)}
           onOpenDisclosure={() => setDisclosureOpen(true)}
+          onRunMirror={() => setQueueState("mirroring")}
         />
       )}
 
