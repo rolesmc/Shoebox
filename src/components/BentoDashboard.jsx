@@ -22,9 +22,9 @@ import DevPanel from './DevPanel.jsx';
 // Neutral STATE_OPTIONS module — shared with DevPanel, breaks the circular dep risk.
 import { STATE_OPTIONS } from './stateOptions.js';
 
-// Mocks (DEV-only by guard inside the mock modules themselves).
-import { listFiles } from '../mocks/googleApi.mock.js';
-import { getAllFiles, getAllFolders, getStressFiles } from '../mocks/mockData.js';
+// Mocks are loaded via DEV-gated dynamic imports inside useEffect below.
+// This ensures the production bundle's static module graph never references
+// `../mocks/*`, so Rollup drops all mock code regardless of sideEffects hints.
 
 // Map composite auth state → per-card state.
 function authCardStates(auth) {
@@ -47,10 +47,10 @@ export default function BentoDashboard() {
   const [gaugeState,  setGaugeState]  = useState('partial');
   const [resumeState, setResumeState] = useState('no-cursor');
 
-  // Files state — synchronous initial paint from mockData, async refresh from listFiles
-  // (proves the Phase 4 swap path works: listFiles → setFiles).
-  const [files,   setFiles]   = useState(() => getAllFiles());
-  const [folders] = useState(() => getAllFolders());
+  // Prod-safe stub: empty arrays. DEV populates via the useEffect below.
+  // Synchronous mock pulls were removed so the static module graph stays mock-free.
+  const [files,   setFiles]   = useState([]);
+  const [folders, setFolders] = useState([]);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
 
   // Dataset-size toggle — Plan 05 wires the actual swap via a separate useEffect.
@@ -60,11 +60,22 @@ export default function BentoDashboard() {
   const [preflightOpen,  setPreflightOpen]  = useState(false);
   const [disclosureOpen, setDisclosureOpen] = useState(false);
 
-  // Async refresh via the locked Phase 4 contract — paginates through the mock.
+  // DEV-only: load mock dataset + paginate listFiles.
+  // In prod, Vite substitutes `import.meta.env.DEV` with `false`, so the useEffect
+  // body exits before the dynamic-import expressions are reached. Rollup then
+  // dead-code-eliminates both the body AND the dynamic-import expressions, and
+  // because the static module graph has zero references to `../mocks/*`, every
+  // mock module is dropped entirely from the prod bundle.
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     let cancelled = false;
     (async () => {
       try {
+        const { getAllFiles, getAllFolders } = await import('../mocks/mockData.js');
+        if (cancelled) return;
+        setFiles(getAllFiles());
+        setFolders(getAllFolders());
+        const { listFiles } = await import('../mocks/googleApi.mock.js');
         const acc = [];
         let pageToken;
         do {
@@ -72,24 +83,35 @@ export default function BentoDashboard() {
           acc.push(...page.files);
           pageToken = page.nextPageToken;
         } while (pageToken);
-        if (!cancelled) setFiles(acc);
+        if (cancelled) return;
+        setFiles(acc);
       } catch (err) {
         // Plan 03's failure injection will trigger this path; surface in console for DevPanel testing.
-        console.warn('[BentoDashboard] listFiles failed:', err);
+        console.warn('[BentoDashboard] DEV mock load failed:', err);
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // When DevPanel toggles a stress-test dataset size (>500), swap files to the stress dataset.
+  // DEV-only: respond to DevPanel dataset size toggle.
+  // Cancellation guard prevents a stale 500-file write from clobbering a fresh
+  // 10k stress dataset when the user toggles datasetSize mid-load (W-04 hardening).
   useEffect(() => {
-    if (datasetSize <= 500) {
-      setFiles(getAllFiles());
-    } else {
-      setFiles(getStressFiles(datasetSize));
-    }
-    // Clear selection when swapping datasets — IDs do not overlap reliably.
-    setSelectedIds(new Set());
+    if (!import.meta.env.DEV) return;
+    let cancelled = false;
+    (async () => {
+      const { getAllFiles, getStressFiles } = await import('../mocks/mockData.js');
+      if (cancelled) return;
+      if (datasetSize <= 500) {
+        setFiles(getAllFiles());
+      } else {
+        setFiles(getStressFiles(datasetSize));
+      }
+      if (cancelled) return;
+      // Clear selection when swapping datasets — IDs do not overlap reliably.
+      setSelectedIds(new Set());
+    })();
+    return () => { cancelled = true; };
   }, [datasetSize]);
 
   const cards = useMemo(() => authCardStates(authState), [authState]);
