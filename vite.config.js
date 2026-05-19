@@ -5,6 +5,8 @@ import { join } from "node:path";
 import zlib from "node:zlib";
 import { Buffer } from "node:buffer";
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 // Custom Content Security Policy & Cloudflare headers plugin
 function viteCspPlugin() {
   let isDev = false;
@@ -120,7 +122,7 @@ function viteBundleSizeGuardPlugin(maxGzipSizeKb = 250) {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), viteCspPlugin(), viteBundleSizeGuardPlugin(250)],
+  plugins: [react(), viteCspPlugin(), viteBundleSizeGuardPlugin(250), cloudflare()],
   server: {
     port: 5188,
     strictPort: false,
