@@ -1,8 +1,20 @@
-# UniVault
+# Shoebox
 
-A 100% client-side, single-page web app for migrating Google Drive contents from one Google account to another (canonical case: school account → personal account before graduation).
+A 100% client-side, single-page web app for moving your Google Drive files from one Google account to another — the place you keep what matters and carry it to a new home.
 
-Files transfer **directly between Google's drives** via the Drive `files/{id}/copy` endpoint — nothing streams through a server.
+Connect two Google accounts in the browser, filter your Drive down to what you actually want to keep (starred items, owned Docs/Sheets/Slides, named project folders — not "Untitled" cruft), and copy the selection into the destination account. Files transfer **directly between Google's drives** via the Drive `files/{id}/copy` endpoint — nothing ever streams through your device, and no file body touches a server we own.
+
+## Who it's for
+
+Anyone consolidating or moving Google Drive content between accounts:
+
+- Switching from an old personal account to a new one
+- Backing up files into a separate Google account before closing the original
+- Cleaning up and carrying forward only the files worth keeping
+
+### School / Workspace accounts (experimental)
+
+The original use case was the graduating-student migration (school account → personal account before the school account is revoked). This still works in many cases, but **Google Workspace accounts managed by a school or organization frequently restrict third-party OAuth apps and the Drive copy API**, which can block the flow entirely depending on the admin's policy. Treat school/Workspace accounts as an **experimental** source until a more reliable path exists. Personal `@gmail.com` accounts on both ends are the fully supported configuration.
 
 ## Stack
 
@@ -68,10 +80,8 @@ Scripts:
 - Strict CSP (`default-src 'none'`, `script-src 'self' https://accounts.google.com/gsi/client`, frames denied) is injected at build time and shipped both as a `<meta>` tag and via `dist/_headers` so Cloudflare Pages serves it as a real header.
 - `prefers-reduced-motion` honored throughout.
 
-## Project status
-
-All implementation phases (0–9) are complete: scaffold, CSP + bundle budget, IndexedDB persistence, dual-OAuth, real scanner, FileExplorer + smart filters + preflight, folder mirror, copy pool + error classification, resume + wake lock, and polish (animation + confetti + completion summary). Phase 10 (production deploy + real-account smoke test) is the only remaining step and requires the steps above.
-
 ## License
 
 Personal-use tool. No license granted for redistribution.
+
+> Note: the GitHub repo and the `univault.pages.dev` URL still carry the old "univault" name — only the product/UI has been renamed to Shoebox. Renaming those is optional and separate (renaming the Pages project would require re-adding the new origin to the OAuth client's Authorized JavaScript origins).
