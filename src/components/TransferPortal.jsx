@@ -4,7 +4,10 @@ import { useMemo } from "react";
 import { Pause, Play, RefreshCw, Loader2 } from "lucide-react";
 
 function formatBytes(bytes) {
-  if (bytes === 0) return "0 B";
+  // WR-07: guard against NaN / non-finite / negative inputs. parseFloat(NaN.toFixed(1))
+  // returns NaN, which would render as the string "NaN B" in the UI. Drive API
+  // `size` is a string and a malformed payload can poison the aggregate sums.
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -27,7 +30,14 @@ export default function TransferPortal({
   onResume = () => {},
   onReset = () => {},
   onRetryFailed = () => {},
+  onCancelMirror = () => {},
 }) {
+  // WR-05: derived gate for the Pause button. During the brief window between
+  // "last task finished" and "queueState transitions to done", inFlightCount === 0
+  // even though state is still "copying". Showing Pause then lets the user no-op
+  // into paused-with-empty-queue. Hide Pause once there's nothing left to pause.
+  const pauseEligibleTotal = selectedCount - skippedCount;
+  const hasUnfinishedWork = inFlightCount > 0 || completedCount < pauseEligibleTotal;
   const headline = useMemo(() => {
     switch (state) {
       case "idle":
@@ -173,7 +183,34 @@ export default function TransferPortal({
           </button>
         )}
 
-        {state === "copying" && (
+        {/* WR-05: Cancel mirror — the mirror phase previously rendered no
+            buttons at all, leaving sign-out as the only way to abort a
+            runaway folder create stream. The mirror useEffect cleanup
+            handles the abort when queueState transitions away from
+            "mirroring". */}
+        {state === "mirroring" && (
+          <button
+            onClick={onCancelMirror}
+            style={{
+              padding: "8px 20px",
+              background: "transparent",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--line-border)",
+              borderRadius: "10px",
+              fontWeight: 600,
+              fontSize: "13px",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+            title="Cancel folder mirror. In-flight folder create requests still complete (drain-don't-abort)."
+          >
+            Cancel mirror
+          </button>
+        )}
+
+        {/* WR-05: gate Pause by hasUnfinishedWork so the brief copying→done
+            transition window can't render Pause for an effectively-empty queue. */}
+        {state === "copying" && hasUnfinishedWork && (
           <button
             onClick={onPause}
             style={{
