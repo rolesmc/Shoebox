@@ -111,7 +111,11 @@ export default function BentoDashboard() {
           setIsSessionExpired(false);
           TokenStorage.saveSourceCredentials(token, email, expiresAt);
           setMockModalOpen(false);
-          console.log(`[GoogleAuth] Connected Source: ${email}`);
+          // WR-04: gate email logs behind DEV. Production console output is
+          // hooverable by any browser extension; the email is OAuth identity PII.
+          if (import.meta.env.DEV) {
+            console.log(`[GoogleAuth] Connected Source: ${email}`);
+          }
         } catch (err) {
           console.error("Source login failed in email identity fetch:", err);
         }
@@ -124,7 +128,10 @@ export default function BentoDashboard() {
           setIsSessionExpired(false);
           TokenStorage.saveDestCredentials(token, email);
           setMockModalOpen(false);
-          console.log(`[GoogleAuth] Connected Destination: ${email}`);
+          // WR-04: gate email logs behind DEV — same rationale as Source above.
+          if (import.meta.env.DEV) {
+            console.log(`[GoogleAuth] Connected Destination: ${email}`);
+          }
         } catch (err) {
           console.error(
             "Destination login failed in email identity fetch:",
@@ -271,12 +278,29 @@ export default function BentoDashboard() {
       // Mark resumption as present
       setResumeState("cursor-present");
     } else {
-      console.error("[BentoDashboard] API Call Exception:", err);
+      // WR-04: scrub the raw err object. Drive responses can carry file metadata,
+      // internal IDs, and path fragments that leak through extension-readable
+      // console output. Log only the shape we control.
+      console.error(
+        "[BentoDashboard] API Call Exception:",
+        err?.status ?? "no-status",
+        err?.reason ?? err?.message ?? "no-detail",
+      );
     }
   }, []);
 
   // Phase 7 D-13: Retry-Failed-Only — token freshness check, reset failed→pending, flip state.
   const handleRetryFailed = useCallback(async () => {
+    // WR-06: refuse to reset rows while a copy run is in progress. Today the
+    // Retry button only renders in terminal states (done / failed-with-retries),
+    // but that policy is enforced two layers up in TransferPortal — guard here
+    // too so a future state addition can't accidentally let retry race a worker
+    // mid-failed-write, leaving a row stuck in 'failed' forever.
+    if (controllerRef.current) {
+      console.warn("[BentoDashboard] retry-failed called while a run is active; ignoring.");
+      return;
+    }
+
     // Step 1: check destToken freshness before resetting anything. If missing/expired, prompt
     // reconnect via the existing Phase 3 surface — D-14 reuses the AuthCard "Session expired" banner.
     const creds = TokenStorage.getCredentials();
@@ -475,6 +499,12 @@ export default function BentoDashboard() {
             || r === "domainPolicy" || r === "activeItemCreationLimitExceeded"
             || r === "numChildrenInNonRootLimitExceeded" || r === "stop";
         });
+        // WR-06: clear the controller ref BEFORE flipping to a terminal state
+        // so handleRetryFailed (which the user may click immediately on the
+        // next render) sees a clean slate. The effect-cleanup also clears it,
+        // but that runs only on the next queueState transition — too late for
+        // a click that lands in the same React tick as the terminal transition.
+        controllerRef.current = null;
         if (hadStop) {
           setQueueState("stopped-quota");
         } else if (finalTasks.some((t) => t.status === "failed")) {
@@ -578,7 +608,10 @@ export default function BentoDashboard() {
     return unsubscribe;
   }, []);
 
-  // Subscribe to QueueStore tasks to populate live transfer statuses
+  // Subscribe to QueueStore tasks to populate live transfer statuses.
+  // WR-03: now carries bytesTotal in addition to bytesCopied so the aggregate
+  // counter below can derive synchronously from this single subscription instead
+  // of opening a second subscriber that races selectedIds dependency changes.
   const [transferStatuses, setTransferStatuses] = useState({});
   useEffect(() => {
     const unsubscribe = QueueStore.subscribe((tasks) => {
@@ -587,6 +620,7 @@ export default function BentoDashboard() {
         statusMap[t.id] = {
           status: t.status,
           bytesCopied: t.bytesCopied,
+          bytesTotal: t.bytesTotal,
           errorMsg: t.errorMsg,
         };
       });
@@ -595,43 +629,45 @@ export default function BentoDashboard() {
     return unsubscribe;
   }, []);
 
-  // Phase 7 D-16 + D-17: derive aggregate counter from QueueStore.
-  // selectedIds snapshot is read at effect time so subsequent toggles do not retroactively
-  // change the denominator mid-run (matches CR-02 invariant in the copy effect above).
+  // Phase 7 D-16 + D-17: derive aggregate counter synchronously from
+  // transferStatuses + selectedIds via useMemo. WR-03: previously this used
+  // a second QueueStore.subscribe whose callback closed over an alias of
+  // selectedIds, leaving a one-frame race where a status update fired between
+  // toggle and effect-rerun would compute against stale selection. Deriving
+  // here lets React handle ordering; the aliased `selectedSet` confusion is
+  // also gone.
   useEffect(() => {
-    const unsubscribe = QueueStore.subscribe((tasks) => {
-      const selectedSet = selectedIds; // captured at effect render; recompute on dep change
-      const relevant = tasks.filter((t) => selectedSet.has(t.id));
+    const relevant = Object.entries(transferStatuses)
+      .filter(([id]) => selectedIds.has(id))
+      .map(([, v]) => v);
 
-      const completedCount = relevant.filter((t) => t.status === "completed").length;
-      const failedCount = relevant.filter((t) => t.status === "failed").length;
-      const skippedCount = relevant.filter((t) => t.status === "skipped").length;
-      const unknownCount = relevant.filter((t) => t.status === "unknown").length;
-      const inFlightCount = relevant.filter((t) => t.status === "copying").length;
+    const completedCount = relevant.filter((t) => t.status === "completed").length;
+    const failedCount = relevant.filter((t) => t.status === "failed").length;
+    const skippedCount = relevant.filter((t) => t.status === "skipped").length;
+    const unknownCount = relevant.filter((t) => t.status === "unknown").length;
+    const inFlightCount = relevant.filter((t) => t.status === "copying").length;
 
-      // D-05: skipped rows excluded from denominator.
-      const eligible = relevant.filter((t) => t.status !== "skipped");
-      const totalEligible = eligible.length;
+    // D-05: skipped rows excluded from denominator.
+    const eligible = relevant.filter((t) => t.status !== "skipped");
+    const totalEligible = eligible.length;
 
-      // D-17: bytesTotal/bytesCopied already 0 for native files (set in copyQueue.js init phase).
-      const bytesDone = eligible
-        .filter((t) => t.status === "completed")
-        .reduce((s, t) => s + (Number(t.bytesCopied) || 0), 0);
-      const bytesTotal = eligible.reduce((s, t) => s + (Number(t.bytesTotal) || 0), 0);
+    // D-17: bytesTotal/bytesCopied already 0 for native files (set in copyQueue.js init phase).
+    const bytesDone = eligible
+      .filter((t) => t.status === "completed")
+      .reduce((s, t) => s + (Number(t.bytesCopied) || 0), 0);
+    const bytesTotal = eligible.reduce((s, t) => s + (Number(t.bytesTotal) || 0), 0);
 
-      setCopyAggregate({
-        completedCount,
-        failedCount,
-        skippedCount,
-        unknownCount,
-        inFlightCount,
-        bytesDone,
-        bytesTotal,
-        totalEligible,
-      });
+    setCopyAggregate({
+      completedCount,
+      failedCount,
+      skippedCount,
+      unknownCount,
+      inFlightCount,
+      bytesDone,
+      bytesTotal,
+      totalEligible,
     });
-    return unsubscribe;
-  }, [selectedIds]);
+  }, [transferStatuses, selectedIds]);
 
   // Active filter state variables
   const [activeFilters, setActiveFilters] = useState({
@@ -1188,6 +1224,12 @@ export default function BentoDashboard() {
             }}
             onReset={handleReset}
             onRetryFailed={handleRetryFailed}
+            onCancelMirror={() => {
+              // WR-05: transitioning queueState away from "mirroring" fires the
+              // mirror useEffect cleanup (sets active = false). In-flight folder
+              // create requests still complete; no new ones are issued.
+              setQueueState("idle");
+            }}
           />
         </div>
       </div>
