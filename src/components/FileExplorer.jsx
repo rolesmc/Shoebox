@@ -1,7 +1,8 @@
 // FileExplorer — virtualized table backed by react-window (D-09, FILES-01..05).
-// Renders per-row statuses (pending | copying | completed | failed) synced reactively.
+// Renders per-row statuses (pending | copying | completed | failed | skipped | unknown) synced reactively.
 import { FixedSizeList } from "react-window";
 import { useMemo, useState, useEffect, useRef } from "react";
+import { Loader2, CheckCircle2, XCircle, MinusCircle, AlertTriangle } from "lucide-react";
 
 const ROW_HEIGHT = 38; // px — fixed per row
 const LIST_HEIGHT = 480; // px — viewport height
@@ -139,7 +140,7 @@ function Row({ index, style, data }) {
                 background: "rgba(255, 255, 255, 0.25)",
               }}
             />
-            pending
+            Pending
           </span>
         );
       case "copying":
@@ -154,17 +155,8 @@ function Row({ index, style, data }) {
               fontWeight: 500,
             }}
           >
-            <span
-              style={{
-                width: "6px",
-                height: "6px",
-                borderRadius: "50%",
-                background: "var(--accent-purple)",
-                boxShadow: "0 0 6px var(--accent-purple)",
-                animation: "pulse 1.2s infinite ease-in-out",
-              }}
-            />
-            copying...
+            <Loader2 size={12} aria-label="Copying" style={{ animation: "spin 1s linear infinite" }} />
+            Copying…
           </span>
         );
       case "completed":
@@ -179,23 +171,59 @@ function Row({ index, style, data }) {
               fontWeight: 500,
             }}
           >
-            <span
-              style={{
-                width: "6px",
-                height: "6px",
-                borderRadius: "50%",
-                background: "var(--accent-neon)",
-                boxShadow: "0 0 6px var(--accent-neon)",
-              }}
-            />
-            completed
+            <CheckCircle2 size={12} aria-hidden="true" />
+            Completed
           </span>
         );
       case "failed":
         return (
-          <ErrorDropdown
-            errorMsg={transfer.errorMsg || "Unknown Google API error."}
-          />
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              color: "#f87171",
+              fontSize: "12px",
+              fontWeight: 500,
+            }}
+          >
+            <XCircle size={12} aria-hidden="true" />
+            <ErrorDropdown errorMsg={transfer.errorMsg || "Unknown Google API error."} />
+          </span>
+        );
+      case "skipped":
+        return (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              color: "var(--text-secondary)",
+              fontSize: "12px",
+              fontWeight: 500,
+            }}
+            title={transfer.reason || "Skipped"}
+          >
+            <MinusCircle size={12} aria-hidden="true" />
+            Skipped
+          </span>
+        );
+      case "unknown":
+        return (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              color: "var(--text-secondary)",
+              fontSize: "12px",
+              fontWeight: 500,
+            }}
+            title="Network interrupted — status uncertain. Resume to retry after reconnecting."
+          >
+            <AlertTriangle size={12} aria-hidden="true" />
+            Unknown
+          </span>
         );
       default:
         return null;
