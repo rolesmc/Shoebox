@@ -1,7 +1,9 @@
-// ResumeBanner — mount-time. Real wiring in Phase 8. D-10 states: no-cursor | cursor-present.
+// ResumeBanner — Phase 8. Wired resume/discard banner. D-10 states: no-cursor | cursor-present.
 export default function ResumeBanner({
   cursorPresent = false,
   remainingCount = 0,
+  onResume = () => {},
+  onDiscard = () => {},
 }) {
   if (!cursorPresent) return null;
   return (
@@ -40,6 +42,8 @@ export default function ResumeBanner({
       </div>
       <div style={{ display: "flex", gap: "8px" }}>
         <button
+          type="button"
+          onClick={onResume}
           style={{
             padding: "8px 14px",
             background: "var(--accent-purple)",
@@ -52,6 +56,8 @@ export default function ResumeBanner({
           Resume
         </button>
         <button
+          type="button"
+          onClick={onDiscard}
           style={{
             padding: "8px 14px",
             background: "transparent",
