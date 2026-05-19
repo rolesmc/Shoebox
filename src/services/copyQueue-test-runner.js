@@ -19,14 +19,23 @@ function log(msg) {
 }
 
 async function notifyServer(passed) {
+  // WR-08: surface notify failures visibly in the results pane. The headless
+  // smoke runner depends on this POST to fail/pass the build; if CSP changes,
+  // the endpoint moves, or the request 4xxs, swallowing the failure produces
+  // a "ALL TESTS PASSED: YES" log that never reaches the harness — a silent-
+  // success regression.
   try {
-    await fetch("/api/test-results", {
+    const res = await fetch("/api/test-results", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ passed, results: logs.join("\n") }),
     });
+    if (!res.ok) throw new Error(`smoke-server returned ${res.status}`);
   } catch (err) {
     console.error("Failed to notify smoke test server:", err);
+    if (resultsNode) {
+      resultsNode.textContent += `\n\nWARNING: smoke-server notify failed: ${err.message}`;
+    }
   }
 }
 
@@ -294,6 +303,16 @@ function makeConcurrencyTrackedCopyFile({ holdMs = 20, behaviors = [] } = {}) {
     assert(
       classifyDriveError({ name: "TypeError", message: "Failed to fetch" }) === "unknown",
       "COPY-03: network error → unknown (D-08)"
+    );
+    // BL-03: { status: 0 } is the canonical fetch/XHR network-failure shape — must
+    // route to 'unknown', NOT 'skip', or transient network blips silently drop files.
+    assert(
+      classifyDriveError({ status: 0 }) === "unknown",
+      "COPY-03 / BL-03: status 0 (network-shaped) → unknown, not skip"
+    );
+    assert(
+      classifyDriveError({ status: null }) === "unknown",
+      "COPY-03 / BL-03: status null → unknown, not skip"
     );
 
     // ---- Group 6: runCopyQueue init — folder + MIME skips (D-05, D-06), COPY-05 ----
