@@ -941,6 +941,7 @@ export default function BentoDashboard() {
           onOpenPreflight={() => setPreflightOpen(true)}
           onOpenDisclosure={() => setDisclosureOpen(true)}
           onRunMirror={() => setQueueState("mirroring")}
+          onRunCopyQueue={() => window.open('/copy-queue-test.html', '_blank', 'noopener,noreferrer')}
         />
       )}
 
