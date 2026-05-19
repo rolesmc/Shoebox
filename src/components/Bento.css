@@ -71,4 +71,66 @@
   .transfer-portal.is-active {
     animation: none;
   }
+  .completion-summary .failure-chevron {
+    transition: none;
+  }
+}
+
+/* ---- Phase 9 POLISH-03: CompletionSummary failure-row chrome ---- */
+.completion-summary .failure-row {
+  border-top: 1px solid var(--line-border);
+  padding: 8px 0;
+}
+.completion-summary .failure-row > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+.completion-summary .failure-row > summary::-webkit-details-marker {
+  display: none;
+}
+.completion-summary .failure-row > summary::marker {
+  content: '';
+}
+.completion-summary .failure-chevron {
+  transition: transform 150ms ease-out;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.completion-summary .failure-row[open] > summary .failure-chevron {
+  transform: rotate(90deg);
+}
+.completion-summary .failure-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.completion-summary .failure-reason-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-border);
+  flex-shrink: 0;
+}
+.completion-summary .failure-detail {
+  margin: 6px 0 0 20px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
 }

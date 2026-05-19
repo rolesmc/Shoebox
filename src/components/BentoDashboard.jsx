@@ -10,6 +10,7 @@ import AuthCard from "./AuthCard.jsx";
 import FileExplorer from "./FileExplorer.jsx";
 import StorageGauge from "./StorageGauge.jsx";
 import TransferPortal from "./TransferPortal.jsx";
+import CompletionSummary from "./CompletionSummary.jsx";
 import ResumeBanner from "./ResumeBanner.jsx";
 import SmartFilterButtons from "./SmartFilterButtons.jsx";
 import PreflightModal from "./PreflightModal.jsx";
@@ -786,6 +787,7 @@ export default function BentoDashboard() {
           bytesCopied: t.bytesCopied,
           bytesTotal: t.bytesTotal,
           errorMsg: t.errorMsg,
+          reason: t.reason,           // POLISH-03: surface reason for CompletionSummary failure tag
         };
       });
       setTransferStatuses(statusMap);
@@ -850,6 +852,24 @@ export default function BentoDashboard() {
       fireConfetti();
     }
   }, [queueState, fireConfetti]);
+
+  // Phase 9 POLISH-03: failure rows for CompletionSummary.
+  // Built from transferStatuses (which now carries `reason` per the
+  // statusMap extension above) so we do NOT open a second QueueStore
+  // subscription — keeps the data path single-sourced.
+  const failureTasks = useMemo(() => {
+    return Object.entries(transferStatuses)
+      .filter(([id, t]) => selectedIds.has(id) && t.status === "failed")
+      .map(([id, t]) => ({ id, errorMsg: t.errorMsg, reason: t.reason }));
+  }, [transferStatuses, selectedIds]);
+
+  // Map file.id -> file for resolving display names in the failure list.
+  // `files` is the existing selected-file array already in scope.
+  const filesById = useMemo(() => {
+    const m = new Map();
+    for (const f of files) m.set(f.id, f);
+    return m;
+  }, [files]);
 
   // Active filter state variables
   const [activeFilters, setActiveFilters] = useState({
@@ -1414,6 +1434,19 @@ export default function BentoDashboard() {
               // create requests still complete; no new ones are issued.
               setQueueState("idle");
             }}
+          />
+          <CompletionSummary
+            visible={
+              queueState === "done" ||
+              queueState === "failed-with-retries" ||
+              queueState === "stopped-quota"
+            }
+            completedCount={copyAggregate.completedCount}
+            skippedCount={copyAggregate.skippedCount}
+            failedCount={copyAggregate.failedCount}
+            unknownCount={copyAggregate.unknownCount}
+            failures={failureTasks}
+            filesById={filesById}
           />
         </div>
       </div>
