@@ -48,12 +48,20 @@ function isFolder(mimeType) {
 
 // D-17: Google-native files (size === 0 AND mime starts with application/vnd.google-apps.)
 // count as 0 bytes. Non-native uses file.size verbatim.
+// WR-07: coerce defensively. Drive API documents `size` as a string for files
+// with content and omits it otherwise; a malformed payload (or test fixture)
+// could supply "not-a-number", which would propagate as NaN through the
+// aggregate sums and surface as "NaN B" in TransferPortal.
 function bytesForFile(file) {
-  if (!file?.mimeType) return Number(file?.size || 0);
+  if (!file?.mimeType) {
+    const n = Number(file?.size);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
   if (file.mimeType.startsWith(GAPP_PREFIX) && (!file.size || Number(file.size) === 0)) {
     return 0;
   }
-  return Number(file.size || 0);
+  const n = Number(file.size);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +108,9 @@ export function runCopyQueue({
 
   // Shared mutable context — workers read destToken + stopFlag from here.
   // T-07-11: destToken is only ever forwarded to copyFile; never logged.
+  // BL-02: pool threaded into ctx so handleCopyError can pause sibling workers
+  // synchronously on the first reauth — without it, every queued worker burns
+  // its retry budget against an already-invalidated token and re-fires onAuthError.
   const ctx = {
     filesById,
     destToken,
@@ -111,6 +122,7 @@ export function runCopyQueue({
     sleep,
     stopFlag: false,
     enableFailureInjection,
+    pool,
   };
 
   // donePromise is the async body of the orchestrator. Exposed via .done so callers
@@ -194,13 +206,24 @@ export function runCopyQueue({
 
     await Promise.all(submissions);
     await pool.drain();
+    // BL-01: release worker fibers + their 50ms polling timers. Without this,
+    // each runCopyQueue invocation leaks 3 zombie workers for the tab's lifetime
+    // (retries multiply: 3 attempts × 3 workers = 12 zombies after a few runs).
+    pool.close();
   })();
 
   // Controller shape per D-02 (mirrors mirrorFolders return shape).
   return {
     pause: () => pool.pause(),
     resume: () => pool.resume(),
-    stop: () => { ctx.stopFlag = true; },
+    stop: () => {
+      ctx.stopFlag = true;
+      // BL-01: also close the pool so its workers exit. Tasks already mid-fetch
+      // still complete (drain-don't-abort, T-07-13) because close() does not
+      // interrupt in-flight taskFn invocations — it only stops workers from
+      // shifting NEW items off the queue.
+      pool.close();
+    },
     done: donePromise,
   };
 }
@@ -219,7 +242,28 @@ export function runCopyQueue({
  */
 async function copyOne(taskId, ctx) {
   // D-04: exit early between tasks if stop was called.
-  if (ctx.stopFlag) return;
+  // WR-02: when stopFlag is set by a sibling worker (e.g. dailyLimitExceeded),
+  // explicitly normalize this row back to 'pending' with cleared error fields
+  // so the user sees the gap (M - completed - skipped - failed) and a future
+  // re-run picks it up without inheriting stale errorMsg/reason. Persist defensively
+  // — the row may not exist yet (init phase did the first write) but updateTask
+  // upserts. Wrapped in try/catch so a store error never blocks the worker exit.
+  if (ctx.stopFlag) {
+    try {
+      const existing = await ctx.queueStore.getTask?.(taskId);
+      // Only touch rows that are still pending/copying — don't clobber completed/skipped/failed.
+      if (!existing || existing.status === "pending" || existing.status === "copying") {
+        await ctx.queueStore.updateTask(taskId, {
+          status: "pending",
+          errorMsg: null,
+          reason: null,
+        });
+      }
+    } catch (storeErr) {
+      console.error("[CopyQueue] stopFlag pending-normalize failed:", storeErr);
+    }
+    return;
+  }
 
   const file = ctx.filesById.get(taskId);
   if (!file) {
@@ -322,6 +366,14 @@ async function handleCopyError(taskId, err, ctx) {
       errorMsg: null,
       reason: null,
     });
+    // BL-02: pause sibling workers BEFORE invoking the funnel. Without this, every
+    // other queued task POSTs with the same now-invalidated destToken, each one
+    // fires onAuthError again, and the funnel runs N times instead of once. The
+    // pause is policy that belongs in the orchestrator — relying on the UI layer
+    // to remember to call controllerRef.current.pause() is a footgun.
+    // Drain-don't-abort still holds: pause() blocks workers between tasks; any
+    // copy already mid-fetch completes normally (T-07-13).
+    ctx.pool?.pause();
     // WR-01: single funnel — invoked at orchestrator boundary only (not inside fetchWithBackoff).
     // T-07-12: wrapped in try/catch so a throwing funnel doesn't crash the worker.
     // T-07-16: worker returns after this — does NOT re-submit the same task immediately.
