@@ -16,6 +16,10 @@ import PreflightModal from "./PreflightModal.jsx";
 import DisclosureModal from "./DisclosureModal.jsx";
 import DevPanel from "./DevPanel.jsx";
 
+// Phase 8: Resume + Wake Lock
+import { useWakeLock } from "../hooks/useWakeLock.js";
+import { rehydrateQueueFromCursor } from "../services/queueRehydration.js";
+
 // Auth and Persistence services
 import { GoogleAuth } from "../services/googleAuth.js";
 import { TokenStorage } from "../services/storage.js";
@@ -96,6 +100,10 @@ export default function BentoDashboard() {
     bytesTotal: 0,
     totalEligible: 0,
   });
+
+  // Phase 8 RESUME-01: reactive remaining count from QueueStore.subscribe. Single
+  // source of truth per D-01 (count is computed from IDB, never stored in localStorage).
+  const [remainingCount, setRemainingCount] = useState(0);
 
   // ----------------------------------------------------
   // OAuth Clients Initialization
@@ -274,9 +282,8 @@ export default function BentoDashboard() {
       setDestEmail(null);
       setTokenExpiresAt(null);
       TokenStorage.clearAll();
-
-      // Mark resumption as present
-      setResumeState("cursor-present");
+      // resumeState is now set by the mount rehydration effect (Phase 8 D-02).
+      // Redundant setResumeState("cursor-present") removed — single source of truth.
     } else {
       // WR-04: scrub the raw err object. Drive responses can carry file metadata,
       // internal IDs, and path fragments that leak through extension-readable
@@ -327,6 +334,57 @@ export default function BentoDashboard() {
 
     // Step 3: re-fire the copy effect by transitioning queueState.
     setQueueState("copying");
+  }, []);
+
+  // ----------------------------------------------------
+  // Phase 8 RESUME-02: handleResume — re-promote orphans (idempotent) then flip queueState.
+  // ----------------------------------------------------
+  // Researcher Open Question #3: token freshness check mirrors handleRetryFailed
+  // (line 304-314) — belt-and-suspenders against a brief 'copying' flash that
+  // would immediately become 'paused' on first 401.
+  const handleResume = useCallback(async () => {
+    // Re-run rehydration. First call (mount) already promoted; second call is
+    // a no-op per RESEARCH.md "Strict-Mode safety" — zero 'copying' rows now.
+    await rehydrateQueueFromCursor();
+
+    const creds = TokenStorage.getCredentials();
+    const tokenFresh =
+      creds.destToken &&
+      (!creds.tokenExpiresAt || creds.tokenExpiresAt > Date.now());
+    if (!tokenFresh) {
+      setIsSessionExpired(true);
+      setAuthState("expired");
+      return;
+    }
+
+    // Existing copy effect fires on the queueState transition and picks up
+    // 'pending' rows. The cursor effect below will refresh the cursor timestamp
+    // from this transition. All idempotent.
+    setQueueState("copying");
+  }, []);
+
+  // ----------------------------------------------------
+  // Phase 8 D-11: handleDiscard — clear queue + cursor; PRESERVE FileStore /
+  // SelectionStore / FolderMapStore (the user keeps their scan + selection +
+  // folder map; CONTEXT.md D-11).
+  // ----------------------------------------------------
+  const handleDiscard = useCallback(async () => {
+    // Researcher Open Question #2: include window.confirm. Discard is
+    // destructive and the banner button is small; cost = one line; benefit =
+    // prevents accidental data loss in a long-running multi-day workflow.
+    if (
+      !window.confirm(
+        "Discard interrupted transfer? Your selection is preserved.",
+      )
+    ) {
+      return;
+    }
+
+    await QueueStore.clear(); // fires notifyQueueChange([]) → subscriber sets remainingCount to 0
+    TokenStorage.saveResumeCursor(null);
+    setResumeState("no-cursor");
+    setQueueState("idle");
+    // FileStore, SelectionStore, FolderMapStore deliberately preserved (D-11).
   }, []);
 
   // ----------------------------------------------------
@@ -531,6 +589,102 @@ export default function BentoDashboard() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueState, handleApiError]); // CR-02: selectedIds + destToken + files intentionally excluded — snapshotted above
+
+  // ----------------------------------------------------
+  // Phase 8: Resume cursor write/clear (D-02)
+  // ----------------------------------------------------
+  // CR-02: depends ONLY on queueState. Writes on entering 'copying' or 'paused';
+  // clears on entering 'done'. Per Pitfall P8-1, 'idle' / 'mirroring' /
+  // 'stopped-quota' / 'failed-with-retries' / 'mirror-failed' are deliberate
+  // no-ops — those states preserve the daily-quota / authError resume path
+  // (CONTEXT.md D-02 + "Specifics" lines 122-123).
+  useEffect(() => {
+    if (queueState === "copying" || queueState === "paused") {
+      TokenStorage.saveResumeCursor(
+        JSON.stringify({ state: queueState, savedAt: Date.now() }),
+      );
+    } else if (queueState === "done") {
+      TokenStorage.saveResumeCursor(null);
+    }
+    // idle / mirroring / stopped-quota / failed-with-retries / mirror-failed: no-op (D-02)
+  }, [queueState]);
+
+  // ----------------------------------------------------
+  // Phase 8: beforeunload guard (D-10, RESUME-05)
+  // ----------------------------------------------------
+  // CR-02: queueState only. Listener defined inside effect (Pitfall BU-2 +
+  // BU-4) so the cleanup closure captures the exact reference it registered.
+  // Modern semantics require BOTH preventDefault() and returnValue = ''
+  // (Chrome quirk + legacy compat — RESEARCH.md lines 257-264). Custom
+  // strings are universally ignored by 2026 browsers; do NOT set one.
+  useEffect(() => {
+    if (queueState !== "copying" && queueState !== "mirroring") return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [queueState]);
+
+  // ----------------------------------------------------
+  // Phase 8: Wake lock — held while transfer is active (D-07, D-08, RESUME-04)
+  // ----------------------------------------------------
+  // The hook handles visibilitychange re-acquire and best-effort try/catch
+  // (D-09 — failures silently swallowed; iOS Safari has no navigator.wakeLock
+  // and the hook short-circuits via optional chaining).
+  useWakeLock(queueState === "copying" || queueState === "mirroring");
+
+  // ----------------------------------------------------
+  // Phase 8: Mount-time queue rehydration (D-06, RESUME-02, RESUME-03)
+  // ----------------------------------------------------
+  // Runs ONCE on mount. Promotes orphaned 'copying' rows to 'unknown' (D-04)
+  // and sets resumeState based on whether anything is resumable.
+  // Idempotent under Strict-Mode double-invoke — see RESEARCH.md lines 456-462.
+  // Empty-deps array is intentional (mount-only); the `cancelled` flag covers
+  // the async race per Pitfall P8-5.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await rehydrateQueueFromCursor();
+      if (cancelled) return;
+      setResumeState(result.cursor ? "cursor-present" : "no-cursor");
+      if (result.promotedCount > 0) {
+        console.log(
+          `[BentoDashboard] Phase 8 rehydration promoted ${result.promotedCount} orphaned 'copying' row(s) to 'unknown'.`,
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount-only; intentional
+
+  // ----------------------------------------------------
+  // Phase 8: Reactive remainingCount via QueueStore.subscribe (RESUME-01)
+  // ----------------------------------------------------
+  // Mount-only. Replaces the line-986 `selectedIds.size - completedCount`
+  // heuristic which goes stale on Discard (Pitfall P8-2).
+  useEffect(() => {
+    const unsub = QueueStore.subscribe((tasks) => {
+      setRemainingCount(
+        tasks.filter(
+          (t) => t.status === "pending" || t.status === "copying",
+        ).length,
+      );
+    });
+    // Initial fill — subscribe fires on subsequent changes only; pull current state once.
+    (async () => {
+      const tasks = await QueueStore.getTasks();
+      setRemainingCount(
+        tasks.filter(
+          (t) => t.status === "pending" || t.status === "copying",
+        ).length,
+      );
+    })();
+    return unsub;
+  }, []);
 
   // ----------------------------------------------------
   // Master Sign-Out Handler (AUTH-07)
@@ -983,7 +1137,9 @@ export default function BentoDashboard() {
 
       <ResumeBanner
         cursorPresent={resumeState === "cursor-present"}
-        remainingCount={selectedIds.size - completedCount}
+        remainingCount={remainingCount}
+        onResume={handleResume}
+        onDiscard={handleDiscard}
       />
 
       {/* Streaming Scan Progress Indicator (SCAN-01) */}
