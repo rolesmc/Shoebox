@@ -43,3 +43,32 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ---- Phase 9 POLISH-01: TransferPortal active-state pulse ---- */
+.transfer-portal.is-active {
+  /* GPU-composited box-shadow pulse; no layout thrash, no JS per-frame. */
+  animation: transfer-pulse 2s ease-in-out infinite;
+}
+
+@keyframes transfer-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+  50%      { box-shadow: 0 0 24px 0 rgba(139, 92, 246, 0.35); }
+}
+
+/* ---- Phase 9 fix: ship the missing shimmer keyframes block ----
+   BentoDashboard.jsx:1201 references this on the scan-progress bar,
+   but the keyframe block was never authored. CSS silently ignores
+   unknown animation names — Phase 4 scan UI has been broken since ship. */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+/* ---- Phase 9 a11y: honor user motion preference for CSS animations.
+   canvas-confetti is handled via its own disableForReducedMotion option in
+   useConfetti.js (Task B). */
+@media (prefers-reduced-motion: reduce) {
+  .transfer-portal.is-active {
+    animation: none;
+  }
+}

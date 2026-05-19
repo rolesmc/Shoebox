@@ -106,7 +106,9 @@ export default function TransferPortal({
 
   return (
     <div
-      className="glass-card"
+      className={`glass-card transfer-portal${
+        state === "copying" || state === "mirroring" ? " is-active" : ""
+      }`}
       style={{
         padding: "24px",
         minHeight: "200px",
