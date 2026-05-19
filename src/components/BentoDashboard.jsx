@@ -20,6 +20,9 @@ import DevPanel from "./DevPanel.jsx";
 import { useWakeLock } from "../hooks/useWakeLock.js";
 import { rehydrateQueueFromCursor } from "../services/queueRehydration.js";
 
+// Phase 9: Polish
+import { useConfetti } from "../hooks/useConfetti.js";
+
 // Auth and Persistence services
 import { GoogleAuth } from "../services/googleAuth.js";
 import { TokenStorage } from "../services/storage.js";
@@ -86,6 +89,13 @@ export default function BentoDashboard() {
   // Phase 7: copy-queue controller lives in a ref so re-renders don't recreate workers
   // (07-RESEARCH.md Pitfall 1: useState would spawn a new pool every render).
   const controllerRef = useRef(null);
+
+  // Phase 9 POLISH-02: single-fire confetti on queueState transition to "done".
+  // Uses useRef(false) (NOT useState) so flipping the gate does not trigger a
+  // re-render and is Strict-Mode safe (Pitfall 2). Re-armed below when a new
+  // run starts so the second migration also celebrates.
+  const fireConfetti = useConfetti();
+  const confettiFiredRef = useRef(false);
 
   // Phase 7 D-16: aggregate counter derived from QueueStore.subscribe.
   // Denominator excludes 'skipped' rows (D-05 folders + D-06 MIMEs); native files
@@ -822,6 +832,24 @@ export default function BentoDashboard() {
       totalEligible,
     });
   }, [transferStatuses, selectedIds]);
+
+  // Phase 9 POLISH-02: edge-triggered confetti.
+  // CR-02 invariant (Phase 8): dependency array is [queueState, fireConfetti] only.
+  // fireConfetti is useCallback-memoized inside useConfetti, so it is stable.
+  // Fires on the queueState === "done" edge (Pitfall 7: aggregate counts can
+  // flip a tick before queueState). Does NOT fire on failed-with-retries or
+  // stopped-quota (Pitfall 9).
+  useEffect(() => {
+    if (queueState === "idle" || queueState === "copying" || queueState === "mirroring") {
+      // Re-arm for the next migration.
+      confettiFiredRef.current = false;
+      return;
+    }
+    if (queueState === "done" && !confettiFiredRef.current) {
+      confettiFiredRef.current = true;
+      fireConfetti();
+    }
+  }, [queueState, fireConfetti]);
 
   // Active filter state variables
   const [activeFilters, setActiveFilters] = useState({
