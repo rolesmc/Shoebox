@@ -1,84 +1,77 @@
 # UniVault
 
-100% client-side Vite + React SPA for selectively migrating Google Drive
-contents from one Google account to another. See repository root
-`CLAUDE.md` for product framing and stack rationale.
+A 100% client-side, single-page web app for migrating Google Drive contents from one Google account to another (canonical case: school account → personal account before graduation).
 
-## Setup
+Files transfer **directly between Google's drives** via the Drive `files/{id}/copy` endpoint — nothing streams through a server.
 
-```bash
-cd univault
-npm install
-npm run dev
-```
+## Stack
 
-Requires Node 20.19+ or 22.12+ (enforced via `engines`).
+- Vite 8 + React 19 (plain JS, no TypeScript)
+- Plain CSS variables (no Tailwind)
+- Google Identity Services (GIS) for dual-account OAuth
+- IndexedDB (`idb`) for the file index, selection, queue, and folder map
+- `localStorage` for tokens and resume cursor
+- `canvas-confetti` for completion celebration (dynamic-imported)
+- `react-window` for the virtualized file list
 
-## Verifying a release candidate
+Bundle budget: **≤250 KB gzipped main chunk**, enforced at build time.
 
-Before declaring a build deployable, run:
+## Requirements
 
-```bash
-npm run smoke:prod
-```
+- Node `>=20.19 <21` or `>=22.12`
+- A Google Cloud OAuth 2.0 Client ID (Web application)
 
-This script:
-
-1. Runs `npm run build`.
-2. Serves `dist/` via `vite preview` on an ephemeral port.
-3. Loads the served URL in headless Chrome (falls back to a strict
-   HTTP-level check if Chrome is not on PATH; the fallback prints a
-   warning because it cannot detect runtime exceptions).
-4. Asserts the React tree mounted (`#root` non-empty), the string
-   `loaded outside DEV` is absent from the bundle, and the strings
-   `UniVault` + `glass-card` are present.
-5. Exits non-zero on any failure.
-
-This catches the Phase 0 regression class where `npm run build`
-exits 0 but the bundle throws on module load and renders a blank
-page (see `.planning/phases/00-skeleton-mock-api/00-VERIFICATION.md`).
-
-To force a specific Chrome binary:
+## Local development
 
 ```bash
-CHROME_PATH=/path/to/chrome npm run smoke:prod
+npm ci
+echo 'VITE_GOOGLE_CLIENT_ID="YOUR-CLIENT-ID.apps.googleusercontent.com"' > .env.local
+npm run dev          # http://localhost:5188
 ```
 
-## Manual UX checks (Phase 0 acceptance)
+Without `VITE_GOOGLE_CLIENT_ID`, the app falls back to mock Drive data — useful for UI work without a Google Cloud Console setup.
 
-After `npm run dev`, open `http://localhost:5188` and verify:
+Scripts:
 
-1. **Glassmorphism visual fidelity**: dark background `#060608`,
-   glass cards visibly blurred with subtle borders, Inter font on
-   body text, JetBrains Mono on tabular numbers, emerald/purple
-   accents on action elements.
-2. **DevPanel state cycling**: cycle each toggle row (Auth × 5,
-   Scan × 4, Queue × 6, Gauge × 4, Resume × 2, Failure × 6,
-   Dataset × 4). Each toggle should update the corresponding
-   component without console errors.
-3. **10k-row FileExplorer scroll smoothness**: click `Dataset →
-10,000 rows` in the DevPanel. Scroll the FileExplorer with the
-   mouse wheel from top to bottom while Chrome DevTools →
-   Performance is recording (5-second capture). Acceptance:
-   - Scroll feels smooth (no perceptible jank).
-   - Performance flame-graph shows no frames longer than ~50ms.
-   - DOM inspection of the row container shows ~15-25
-     `<div role="row">` (or `<label>`) row elements, NOT 10,000.
+- `npm run dev` — Vite dev server with dual-mode CSP
+- `npm run build` — production build to `dist/`, runs bundle size guard + emits `dist/_headers`
+- `npm run preview` — serve the built bundle
+- `npm run lint` — ESLint flat config
+- `npm run smoke:prod` — production smoke check (see `scripts/smoke-prod.mjs`)
 
-## Google Identity Services (GIS) & OAuth Consent Details
+## Cloudflare Pages deploy
 
-UniVault utilizes direct standard client-side browser popups for OAuth2 authorization flows.
+1. **Create OAuth Client** in [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
+   - Application type: **Web application**
+   - Authorized JavaScript origins: add your production URL (e.g. `https://univault.pages.dev`) and any preview/custom domains. Add `http://localhost:5188` for local dev.
+   - No redirect URI needed — GIS token model uses a popup, not a redirect.
+   - Scopes the app requests at runtime: `https://www.googleapis.com/auth/drive.readonly` (source) and `https://www.googleapis.com/auth/drive.file` (destination).
 
-### OAuth Scopes
+2. **Create Cloudflare Pages project**:
+   - Connect this repo
+   - Framework preset: **Vite**
+   - Build command: `npm run build`
+   - Build output directory: `dist`
+   - Environment variable: `VITE_GOOGLE_CLIENT_ID` = your client ID (set for both Production and Preview)
+   - Compatibility: Node 22
 
-- **School Account (Source):** `https://www.googleapis.com/auth/drive.readonly` and `https://www.googleapis.com/auth/userinfo.email`
-- **Personal Account (Destination):** `https://www.googleapis.com/auth/drive.file` and `https://www.googleapis.com/auth/userinfo.email`
+3. **Verify** after first deploy:
+   - DevTools → Network → response headers contain `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` (served from `dist/_headers`)
+   - `<meta http-equiv="Content-Security-Policy">` is present in the HTML with strict production directives (no `unsafe-eval`, no inline scripts)
+   - Main JS chunk is ≤250 KB gzipped
 
-### Testing User Caps & Verification Warnings
+## Security model
 
-Google Workspace restricts access to "unverified apps" requesting sensitive/restricted scopes (like Google Drive). During local development and testing:
+- No backend. No server-side secrets.
+- Two independent `initTokenClient` instances per account — no shared `state` discriminator.
+- Tokens stored in `localStorage` with explicit `expiresAt`; pre-emptive re-auth banner at 50 minutes; 401 from any Drive call pauses the queue and surfaces a reconnect prompt.
+- Strict CSP (`default-src 'none'`, `script-src 'self' https://accounts.google.com/gsi/client`, frames denied) is injected at build time and shipped both as a `<meta>` tag and via `dist/_headers` so Cloudflare Pages serves it as a real header.
+- `prefers-reduced-motion` honored throughout.
 
-1. **Unverified App Warning:** When logging in, Google will show a screen saying "Google hasn't verified this app."
-   - _Resolution:_ Click **Advanced** and then click **Go to UniVault (unsafe)** to proceed to the consent dialog.
-2. **Testing User Limit (Cap):** While the app is in the "Testing" publishing status inside the Google Cloud Console, Google enforces a limit of **100 OAuth testing users**.
-   - _Action:_ If a new testing user receives a `403 Access Blocked: project_id_limit` error, ensure their Google account is added explicitly under the **OAuth consent screen -> Test users** list in the Google Cloud Console.
+## Project status
+
+All implementation phases (0–9) are complete: scaffold, CSP + bundle budget, IndexedDB persistence, dual-OAuth, real scanner, FileExplorer + smart filters + preflight, folder mirror, copy pool + error classification, resume + wake lock, and polish (animation + confetti + completion summary). Phase 10 (production deploy + real-account smoke test) is the only remaining step and requires the steps above.
+
+## License
+
+Personal-use tool. No license granted for redistribution.
