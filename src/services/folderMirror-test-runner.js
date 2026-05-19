@@ -133,8 +133,8 @@ function assert(cond, label) {
         now: () => new Date("2026-05-18T10:00:00Z"),
       });
       const rootName = fakeCF.calls[0]?.name;
-      assert(/^UniVault Migration - \d{4}-\d{2}-\d{2}$/.test(rootName || ""),
-        "MIRROR-02: root name matches 'UniVault Migration - YYYY-MM-DD' format (got: " + rootName + ")");
+      assert(/^Shoebox Migration - \d{4}-\d{2}-\d{2}$/.test(rootName || ""),
+        "MIRROR-02: root name matches 'Shoebox Migration - YYYY-MM-DD' format (got: " + rootName + ")");
       assert(fakeCF.calls[0]?.parents?.[0] === "root",
         "MIRROR-02: root folder is created under destination My Drive root (parents: ['root'])");
       assert(result.mappingCount === 1 && result.rootDestId === fakeCF.calls[0].id,
@@ -183,7 +183,7 @@ function assert(cond, label) {
     {
       // Pre-seed: __ROOT__ + fA + fB already mapped; only fC is missing.
       const seed = {
-        [ROOT_SENTINEL]: { id: ROOT_SENTINEL, destFolderId: "dest-root", name: "UniVault Migration - 2026-05-17" },
+        [ROOT_SENTINEL]: { id: ROOT_SENTINEL, destFolderId: "dest-root", name: "Shoebox Migration - 2026-05-17" },
         fA: { id: "fA", destFolderId: "dest-fA", name: "FolderA" },
         fB: { id: "fB", destFolderId: "dest-fB", name: "FolderB" },
       };

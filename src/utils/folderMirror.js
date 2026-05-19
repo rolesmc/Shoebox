@@ -127,7 +127,7 @@ async function ensureRoot({
   const existing = await folderMapStore.getFolderMapping(ROOT_SENTINEL);
   if (existing) return existing.destFolderId;
 
-  const name = `UniVault Migration - ${formatLocalISODate(now())}`;
+  const name = `Shoebox Migration - ${formatLocalISODate(now())}`;
   const res = await createFolderWithRetry({
     createFolder,
     name,
