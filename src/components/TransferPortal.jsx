@@ -1,6 +1,7 @@
 // TransferPortal — active transfer controller and real-time statistic reporter (POLISH-01).
 // Integrates live stats and standard action buttons for starting, pausing, and resuming.
 import { useMemo } from "react";
+import { Pause, Play, RefreshCw, Loader2 } from "lucide-react";
 
 function formatBytes(bytes) {
   if (bytes === 0) return "0 B";
@@ -16,12 +17,16 @@ export default function TransferPortal({
   selectedCount = 0,
   completedCount = 0,
   failedCount = 0,
+  skippedCount = 0,
+  unknownCount = 0,
+  inFlightCount = 0,
   copiedSize = 0,
   totalSize = 0,
   onStart = () => {},
   onPause = () => {},
   onResume = () => {},
   onReset = () => {},
+  onRetryFailed = () => {},
 }) {
   const headline = useMemo(() => {
     switch (state) {
@@ -33,16 +38,19 @@ export default function TransferPortal({
         return "Copying files…";
       case "paused":
         return "Paused";
+      case "stopped-quota":
+        return "Quota reached";
       case "done":
         return "Migration complete!";
       case "failed-with-retries":
-        return "⚠ Some files failed";
+        return "Some files failed";   // D-UI: dropped warning emoji per UI-SPEC; destructive color carries the signal
       default:
         return "Ready to migrate";
     }
   }, [state]);
 
   const detail = useMemo(() => {
+    const totalForCounter = selectedCount - skippedCount;
     switch (state) {
       case "idle":
         if (!hasBothTokens) {
@@ -55,17 +63,29 @@ export default function TransferPortal({
       case "mirroring":
         return "Recreating folder structure in destination.";
       case "copying":
-        return `3 parallel transfers · ${completedCount} of ${selectedCount} files · ${formatBytes(copiedSize)} of ${formatBytes(totalSize)}`;
+        // D-15: dropped concurrency prefix — concurrency is implementation detail.
+        // UI-SPEC §Aggregate Counter: `{completed} of {total} files · {bytesDone} of {bytesTotal}`
+        return `${completedCount} of ${totalForCounter} files · ${formatBytes(copiedSize)} of ${formatBytes(totalSize)}`;
       case "paused":
-        return `Paused at ${completedCount} of ${selectedCount} files (${formatBytes(copiedSize)})`;
-      case "done":
-        return `${completedCount} files migrated successfully · ${failedCount} failed`;
+        if (inFlightCount > 0) {
+          return `Finishing ${inFlightCount} in-flight file${inFlightCount === 1 ? "" : "s"} before pause completes…`;
+        }
+        return `Paused at ${completedCount} of ${totalForCounter} files (${formatBytes(copiedSize)})`;
+      case "stopped-quota":
+        return `Daily copy limit hit. Saved ${completedCount} of ${totalForCounter} files. Try again tomorrow.`;
+      case "done": {
+        const parts = [`${completedCount} migrated`];
+        if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
+        if (failedCount > 0) parts.push(`${failedCount} failed`);
+        if (unknownCount > 0) parts.push(`${unknownCount} unknown`);
+        return parts.join(" · ");
+      }
       case "failed-with-retries":
         return `${failedCount} file${failedCount === 1 ? "" : "s"} failed after exponential backoff retries.`;
       default:
         return "";
     }
-  }, [state, hasBothTokens, selectedCount, completedCount, failedCount, copiedSize, totalSize]);
+  }, [state, hasBothTokens, selectedCount, completedCount, failedCount, skippedCount, unknownCount, inFlightCount, copiedSize, totalSize]);
 
   const accent = useMemo(() => {
     if (state === "done") return "var(--accent-neon)";
@@ -112,6 +132,9 @@ export default function TransferPortal({
         {headline}
       </div>
       <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
         style={{
           color: "var(--text-secondary)",
           fontSize: "13px",
@@ -128,7 +151,7 @@ export default function TransferPortal({
       </div>
 
       {/* Dynamic Action Buttons */}
-      <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
+      <div style={{ marginTop: "20px", display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
         {state === "idle" && (
           <button
             onClick={onStart}
@@ -163,13 +186,42 @@ export default function TransferPortal({
               fontSize: "13px",
               cursor: "pointer",
               transition: "all 0.2s",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
             }}
           >
-            Pause
+            <Pause size={12} aria-hidden="true" /> Pause
           </button>
         )}
 
-        {state === "paused" && (
+        {/* D-12: Pause drain — disabled "Finishing… (N in flight)" until inFlightCount === 0. */}
+        {state === "paused" && inFlightCount > 0 && (
+          <button
+            disabled
+            aria-disabled="true"
+            aria-label={`Finishing ${inFlightCount} in-flight file${inFlightCount === 1 ? "" : "s"} before pause completes`}
+            style={{
+              padding: "8px 20px",
+              background: "rgba(255, 255, 255, 0.04)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--line-border)",
+              borderRadius: "10px",
+              fontWeight: 600,
+              fontSize: "13px",
+              cursor: "not-allowed",
+              transition: "all 0.2s",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <Loader2 size={12} aria-label="Finishing pause" style={{ animation: "spin 1s linear infinite" }} />
+            Finishing… ({inFlightCount} in flight)
+          </button>
+        )}
+
+        {state === "paused" && inFlightCount === 0 && (
           <>
             <button
               onClick={onResume}
@@ -184,9 +236,12 @@ export default function TransferPortal({
                 cursor: "pointer",
                 boxShadow: "0 0 12px rgba(139, 92, 246, 0.3)",
                 transition: "all 0.2s",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
               }}
             >
-              Resume
+              <Play size={12} aria-hidden="true" /> Resume
             </button>
             <button
               onClick={onReset}
@@ -208,7 +263,30 @@ export default function TransferPortal({
           </>
         )}
 
-        {(state === "done" || state === "failed-with-retries") && (
+        {(state === "done" || state === "failed-with-retries") && failedCount > 0 && (
+          <button
+            onClick={onRetryFailed}
+            style={{
+              padding: "8px 20px",
+              background: "var(--accent-purple)",
+              color: "#fff",
+              border: "none",
+              borderRadius: "10px",
+              fontWeight: 600,
+              fontSize: "13px",
+              cursor: "pointer",
+              boxShadow: "0 0 12px rgba(139, 92, 246, 0.3)",
+              transition: "all 0.2s",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <RefreshCw size={12} aria-hidden="true" /> Retry Failed ({failedCount})
+          </button>
+        )}
+
+        {(state === "done" || state === "failed-with-retries" || state === "stopped-quota") && (
           <button
             onClick={onReset}
             style={{
