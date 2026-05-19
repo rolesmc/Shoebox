@@ -24,8 +24,14 @@ export function classifyDriveError(err) {
   const reason = err?.reason;
   const status = err?.status;
 
-  // 1. Network / unclassified — D-08 unknown bucket
-  if (status === undefined && !reason) return "unknown";
+  // 1. Network / unclassified — D-08 unknown bucket.
+  // BL-03: treat any non-HTTP status (undefined, null, 0, NaN, negative) the same
+  // as missing status. Browser fetch/XHR network failures + CORS preflight rejections
+  // commonly surface as { status: 0 }; without this guard those errors fall through
+  // to "skip" and the file is permanently dropped — exactly the data-loss scenario
+  // the unknown bucket was designed to prevent.
+  const hasUsefulStatus = typeof status === "number" && status >= 100;
+  if (!hasUsefulStatus && !reason) return "unknown";
 
   // 2. Reauth — 401 / authError only. NOT appNotAuthorizedToFile (see RESEARCH.md
   //    Open Question Q2 RESOLVED → skip): drive.file is per-file ACL, re-auth does
