@@ -2,7 +2,7 @@
 // Top-level Bento composer. Owns all UI state per D-11 (no Zustand).
 // DevPanel mounts only when import.meta.env.DEV; Vite tree-shakes the import in prod.
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import "./Bento.css";
 
 // Sibling components
@@ -20,8 +20,9 @@ import DevPanel from "./DevPanel.jsx";
 import { GoogleAuth } from "../services/googleAuth.js";
 import { TokenStorage } from "../services/storage.js";
 import MockLoginModal from "./MockLoginModal.jsx";
-import { clearAllData, FileStore, SelectionStore, QueueStore } from "../services/db.js";
+import { clearAllData, FileStore, SelectionStore, QueueStore, FolderMapStore } from "../services/db.js";
 import { applyFilters } from "../services/filters.js";
+import { ROOT_SENTINEL } from "../utils/folderMirror.js";
 
 // Neutral STATE_OPTIONS module
 import { STATE_OPTIONS } from "./stateOptions.js";
@@ -77,6 +78,24 @@ export default function BentoDashboard() {
   // Modals state
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [disclosureOpen, setDisclosureOpen] = useState(false);
+
+  // Phase 7: copy-queue controller lives in a ref so re-renders don't recreate workers
+  // (07-RESEARCH.md Pitfall 1: useState would spawn a new pool every render).
+  const controllerRef = useRef(null);
+
+  // Phase 7 D-16: aggregate counter derived from QueueStore.subscribe.
+  // Denominator excludes 'skipped' rows (D-05 folders + D-06 MIMEs); native files
+  // contribute 0 bytes (D-17). This replaces the existing per-component derivation.
+  const [copyAggregate, setCopyAggregate] = useState({
+    completedCount: 0,
+    failedCount: 0,
+    skippedCount: 0,
+    unknownCount: 0,
+    inFlightCount: 0,
+    bytesDone: 0,
+    bytesTotal: 0,
+    totalEligible: 0,
+  });
 
   // ----------------------------------------------------
   // OAuth Clients Initialization
@@ -256,6 +275,36 @@ export default function BentoDashboard() {
     }
   }, []);
 
+  // Phase 7 D-13: Retry-Failed-Only — token freshness check, reset failed→pending, flip state.
+  const handleRetryFailed = useCallback(async () => {
+    // Step 1: check destToken freshness before resetting anything. If missing/expired, prompt
+    // reconnect via the existing Phase 3 surface — D-14 reuses the AuthCard "Session expired" banner.
+    const creds = TokenStorage.getCredentials();
+    const tokenFresh =
+      creds.destToken &&
+      (!creds.tokenExpiresAt || creds.tokenExpiresAt > Date.now());
+    if (!tokenFresh) {
+      setIsSessionExpired(true);
+      setAuthState("expired");
+      return;
+    }
+
+    // Step 2: reset all 'failed' rows back to 'pending'. NEVER reset 'unknown' or 'skipped' (D-13).
+    const tasks = await QueueStore.getTasks();
+    for (const t of tasks) {
+      if (t.status === "failed") {
+        await QueueStore.updateTask(t.id, {
+          status: "pending",
+          errorMsg: null,
+          reason: null,
+        });
+      }
+    }
+
+    // Step 3: re-fire the copy effect by transitioning queueState.
+    setQueueState("copying");
+  }, []);
+
   // ----------------------------------------------------
   // Streaming File Listing / Scanning Task progress (SCAN-01 to SCAN-04)
   // ----------------------------------------------------
@@ -373,137 +422,85 @@ export default function BentoDashboard() {
   }, [queueState, handleApiError]); // CR-02: selectedIds + destToken intentionally excluded — snapshotted above
 
   // ----------------------------------------------------
-  // Dynamic Background Transfer Loop (GAUGE-02, FILES-04)
+  // Phase 7: Copy Queue Orchestration (COPY-01..07)
   // ----------------------------------------------------
+  // CR-02 pattern (matches mirror effect): depend ONLY on queueState. selectedIds,
+  // destToken, files snapshotted at effect-fire so mid-run toggles cannot cancel-
+  // restart the pool. Controller held in useRef per Pitfall 1.
   useEffect(() => {
     if (queueState !== "copying") return;
 
     let active = true;
+    const snapshotSelectedIds = new Set(selectedIds);
+    const snapshotDestToken = destToken;
+    const snapshotFiles = files;
 
-    const runQueue = async () => {
-      // queueState is "copying"
-      const selectedArr = Array.from(selectedIds);
-      if (selectedArr.length === 0) {
-        setQueueState("done");
-        return;
-      }
-
-      // 1. Initialize or load tasks in QueueStore
-      const existingTasks = await QueueStore.getTasks();
-      const taskMap = new Map(existingTasks.map((t) => [t.id, t]));
-
-      for (const fileId of selectedArr) {
-        if (!taskMap.has(fileId)) {
-          await QueueStore.updateTask(fileId, { status: "pending", bytesCopied: 0 });
-        }
-      }
-
-      let currentTasks = await QueueStore.getTasks();
-      let activeRun = true;
-
-      while (active && activeRun && queueState === "copying") {
-        const pendingOrFailed = currentTasks.filter(
-          (t) => selectedIds.has(t.id) && t.status !== "completed",
-        );
-
-        if (pendingOrFailed.length === 0) {
+    (async () => {
+      try {
+        if (snapshotSelectedIds.size === 0) {
           setQueueState("done");
-          activeRun = false;
-          break;
+          return;
         }
 
-        // Process up to 3 files concurrently
-        const batch = pendingOrFailed.slice(0, 3);
-        const promises = batch.map(async (task) => {
-          let injectedFailure = "none";
-          try {
-            if (import.meta.env.DEV) {
-              const { getFailureMode } = await import("../mocks/failureInjection.js");
-              injectedFailure = getFailureMode();
-            }
-          } catch (e) {
-            console.warn("Dev failure modes could not be queried:", e);
-          }
+        // WR-03: rootDestId comes from IDB (FolderMapStore), survives reload.
+        const rootMapping = await FolderMapStore.getFolderMapping(ROOT_SENTINEL);
+        if (!active) return;
+        if (!rootMapping) {
+          console.error("[BentoDashboard] No root mapping — folder mirror not complete");
+          setQueueState("mirror-failed");
+          setMirrorError("Folder mirror state missing. Re-run Mirror first.");
+          return;
+        }
 
-          if (injectedFailure !== "none") {
-            let errorMsg = "Google API Error: Daily quota limit exceeded.";
-            let nextStatus = "failed";
-
-            if (injectedFailure === "401") {
-              await handleApiError({ status: 401, errors: [{ reason: "authError" }] });
-              return;
-            } else if (injectedFailure === "429-userRateLimit") {
-              errorMsg = "Error 429: userRateLimitExceeded. Retrying with exponential backoff...";
-              nextStatus = "failed";
-            } else if (injectedFailure === "403-dailyLimit") {
-              errorMsg = "Error 403: dailyLimitExceeded. Daily copy quota of 750 GB reached.";
-              nextStatus = "failed";
-              await QueueStore.updateTask(task.id, { status: nextStatus, errorMsg });
-              setQueueState("failed-with-retries");
-              activeRun = false;
-              return;
-            } else if (injectedFailure === "404") {
-              errorMsg = "Error 404: File not found on source Drive. Skipped.";
-              nextStatus = "failed";
-            } else {
-              errorMsg = `Error: ${injectedFailure}`;
-              nextStatus = "failed";
-            }
-
-            await QueueStore.updateTask(task.id, { status: nextStatus, errorMsg });
-            return;
-          }
-
-          // Mark as copying
-          await QueueStore.updateTask(task.id, { status: "copying" });
-
-          const fileObj = files.find((f) => f.id === task.id);
-          const totalFileBytes = fileObj?.mimeType?.startsWith("application/vnd.google-apps.")
-            ? 0
-            : Number(fileObj?.size || 0);
-
-          if (totalFileBytes === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 300));
-            await QueueStore.updateTask(task.id, {
-              status: "completed",
-              bytesCopied: 0,
-            });
-            return;
-          }
-
-          const steps = 3;
-          for (let step = 1; step <= steps; step++) {
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            if (!active) return;
-            const currentBytes = Math.floor((totalFileBytes / steps) * step);
-            await QueueStore.updateTask(task.id, {
-              bytesCopied: currentBytes,
-            });
-          }
-
-          setDestUsedBytes((prev) => Math.min(destLimitBytes, prev + totalFileBytes));
-          await QueueStore.updateTask(task.id, {
-            status: "completed",
-            bytesCopied: totalFileBytes,
-          });
-        });
-
-        await Promise.all(promises);
+        const { runCopyQueue } = await import("../services/copyQueue.js");
         if (!active) return;
 
-        currentTasks = await QueueStore.getTasks();
-        if (queueState !== "copying") {
-          activeRun = false;
+        const controller = runCopyQueue({
+          selectedIds: snapshotSelectedIds,
+          files: snapshotFiles,
+          destToken: snapshotDestToken,
+          rootDestId: rootMapping.destFolderId,
+          onAuthError: handleApiError,
+        });
+        controllerRef.current = controller;
+
+        await controller.done;
+        if (!active) return;
+
+        // Terminal state: read fresh task snapshot to choose 'stopped-quota' vs 'done' vs 'failed-with-retries'.
+        const finalTasks = await QueueStore.getTasks();
+        const hadStop = finalTasks.some((t) => {
+          const r = t.reason;
+          return r === "dailyLimitExceeded" || r === "quotaExceeded" || r === "storageQuotaExceeded"
+            || r === "domainPolicy" || r === "activeItemCreationLimitExceeded"
+            || r === "numChildrenInNonRootLimitExceeded" || r === "stop";
+        });
+        if (hadStop) {
+          setQueueState("stopped-quota");
+        } else if (finalTasks.some((t) => t.status === "failed")) {
+          setQueueState("failed-with-retries");
+        } else {
+          setQueueState("done");
+        }
+      } catch (err) {
+        if (!active) return;
+        console.error("[BentoDashboard] Copy queue failure caught:", err);
+        if (err?.status === 401 || err?.errors?.[0]?.reason === "authError") {
+          await handleApiError(err);
+        } else {
+          setQueueState("failed-with-retries");
         }
       }
-    };
-
-    runQueue();
+    })();
 
     return () => {
       active = false;
+      // D-04 / D-12: stop() sets a flag; workers drain in-flight POSTs, NEVER abort.
+      controllerRef.current?.stop?.();
+      controllerRef.current = null;
     };
-  }, [queueState, selectedIds, files, destLimitBytes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueState, handleApiError]); // CR-02: selectedIds + destToken + files intentionally excluded — snapshotted above
 
   // ----------------------------------------------------
   // Master Sign-Out Handler (AUTH-07)
@@ -598,6 +595,44 @@ export default function BentoDashboard() {
     return unsubscribe;
   }, []);
 
+  // Phase 7 D-16 + D-17: derive aggregate counter from QueueStore.
+  // selectedIds snapshot is read at effect time so subsequent toggles do not retroactively
+  // change the denominator mid-run (matches CR-02 invariant in the copy effect above).
+  useEffect(() => {
+    const unsubscribe = QueueStore.subscribe((tasks) => {
+      const selectedSet = selectedIds; // captured at effect render; recompute on dep change
+      const relevant = tasks.filter((t) => selectedSet.has(t.id));
+
+      const completedCount = relevant.filter((t) => t.status === "completed").length;
+      const failedCount = relevant.filter((t) => t.status === "failed").length;
+      const skippedCount = relevant.filter((t) => t.status === "skipped").length;
+      const unknownCount = relevant.filter((t) => t.status === "unknown").length;
+      const inFlightCount = relevant.filter((t) => t.status === "copying").length;
+
+      // D-05: skipped rows excluded from denominator.
+      const eligible = relevant.filter((t) => t.status !== "skipped");
+      const totalEligible = eligible.length;
+
+      // D-17: bytesTotal/bytesCopied already 0 for native files (set in copyQueue.js init phase).
+      const bytesDone = eligible
+        .filter((t) => t.status === "completed")
+        .reduce((s, t) => s + (Number(t.bytesCopied) || 0), 0);
+      const bytesTotal = eligible.reduce((s, t) => s + (Number(t.bytesTotal) || 0), 0);
+
+      setCopyAggregate({
+        completedCount,
+        failedCount,
+        skippedCount,
+        unknownCount,
+        inFlightCount,
+        bytesDone,
+        bytesTotal,
+        totalEligible,
+      });
+    });
+    return unsubscribe;
+  }, [selectedIds]);
+
   // Active filter state variables
   const [activeFilters, setActiveFilters] = useState({
     academic: false,
@@ -651,25 +686,12 @@ export default function BentoDashboard() {
     }
   }, [gaugeState]);
 
-  // Live progress summary counts consumed by TransferPortal
-  const completedCount = useMemo(() => {
-    return Object.values(transferStatuses).filter(
-      (t) => selectedIds.has(t.id) && t.status === "completed",
-    ).length;
-  }, [transferStatuses, selectedIds]);
-
-  const failedCount = useMemo(() => {
-    return Object.values(transferStatuses).filter(
-      (t) => selectedIds.has(t.id) && t.status === "failed",
-    ).length;
-  }, [transferStatuses, selectedIds]);
-
-  const copiedSize = useMemo(() => {
-    return Object.values(transferStatuses).reduce(
-      (sum, t) => sum + (selectedIds.has(t.id) ? Number(t.bytesCopied || 0) : 0),
-      0,
-    );
-  }, [transferStatuses, selectedIds]);
+  // Phase 7: replaces the pre-Phase-7 transferStatuses-based derivations.
+  // Counters now flow from copyAggregate, which is populated by the QueueStore.subscribe
+  // effect above. Same shape — just sourced from the single subscriber.
+  const completedCount = copyAggregate.completedCount;
+  const failedCount = copyAggregate.failedCount;
+  const copiedSize = copyAggregate.bytesDone;
 
   const toggleSelected = async (id) => {
     const next = new Set(selectedIds);
@@ -1041,6 +1063,28 @@ export default function BentoDashboard() {
         </div>
       )}
 
+      {/* Phase 7: stopped-quota banner (daily Drive copy quota reached — D-04 stop class) */}
+      {queueState === "stopped-quota" && (
+        <div
+          className="glass-card"
+          style={{
+            padding: "12px 16px",
+            marginBottom: "16px",
+            borderLeft: "4px solid var(--accent-purple)",
+            background: "rgba(139, 92, 246, 0.08)",
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+            Daily copy quota reached
+          </div>
+          <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+            Google's Drive copy limit (≈750 GB/day) has been hit. Resume tomorrow — your queue is saved and {Math.max(0, copyAggregate.totalEligible - copyAggregate.completedCount - copyAggregate.skippedCount)} file{(Math.max(0, copyAggregate.totalEligible - copyAggregate.completedCount - copyAggregate.skippedCount)) === 1 ? "" : "s"} will pick up automatically.
+          </div>
+        </div>
+      )}
+
       {/* Shared Drive Skipped Banner (SCAN-04) */}
       {skippedSharedDrivesCount > 0 && (
         <div
@@ -1127,12 +1171,22 @@ export default function BentoDashboard() {
             selectedCount={selectedIds.size}
             completedCount={completedCount}
             failedCount={failedCount}
+            skippedCount={copyAggregate.skippedCount}
+            unknownCount={copyAggregate.unknownCount}
+            inFlightCount={copyAggregate.inFlightCount}
             copiedSize={copiedSize}
-            totalSize={projectedBytes}
+            totalSize={copyAggregate.bytesTotal}
             onStart={() => setPreflightOpen(true)}
-            onPause={() => setQueueState("paused")}
-            onResume={() => setQueueState("copying")}
+            onPause={() => {
+              controllerRef.current?.pause?.();
+              setQueueState("paused");
+            }}
+            onResume={() => {
+              controllerRef.current?.resume?.();
+              setQueueState("copying");
+            }}
             onReset={handleReset}
+            onRetryFailed={handleRetryFailed}
           />
         </div>
       </div>
