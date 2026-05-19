@@ -1080,7 +1080,7 @@ export default function BentoDashboard() {
               color: "var(--text-primary)",
             }}
           >
-            UniVault
+            Shoebox
           </h1>
           <span style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
             Phase 5 Core Migration Worker · {files.length.toLocaleString()} files
@@ -1353,7 +1353,7 @@ export default function BentoDashboard() {
             </div>
             <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
               {skippedSharedDrivesCount} Shared Drive files were skipped because
-              UniVault only supports migrating "My Drive" assets.
+              Shoebox only supports migrating "My Drive" assets.
             </div>
           </div>
         </div>
