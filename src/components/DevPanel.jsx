@@ -71,6 +71,7 @@ export default function DevPanel({
   onOpenPreflight,
   onOpenDisclosure,
   onRunMirror,
+  onRunCopyQueue,
 }) {
   // Lazy-load failureInjection so the prod static graph never references it.
   // While DevPanel is JSX-gated out of prod by BentoDashboard, this also
@@ -242,6 +243,12 @@ export default function DevPanel({
           <span style={LABEL}>Mirror</span>
           <TogglePill active={false} onClick={onRunMirror}>
             Run Mirror (mock)
+          </TogglePill>
+        </div>
+        <div style={ROW}>
+          <span style={LABEL}>Copy Queue</span>
+          <TogglePill active={false} onClick={onRunCopyQueue}>
+            Run Copy Queue (mock)
           </TogglePill>
         </div>
       </div>
